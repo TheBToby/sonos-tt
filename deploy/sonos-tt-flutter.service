@@ -1,0 +1,24 @@
+[Unit]
+Description=Sonos TT Flutter Kiosk (flutter-pi)
+After=network-online.target soco-cli.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pi
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/usr/local/bin/flutter-pi /opt/sonos-tt/libapp.so --release
+Restart=on-failure
+RestartSec=3
+
+# Security / resource limits
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sonos-tt /run/user/1000
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

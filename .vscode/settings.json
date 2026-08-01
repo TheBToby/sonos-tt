@@ -1,0 +1,16 @@
+{
+  "files.associations": {
+    "*.dart": "dart"
+  },
+  "dart.flutterSdkPath": "/Users/tobias/Downloads/flutter",
+  "dart.lineLength": 100,
+  "dart.analysisExcludedFolders": [".dart_tool", "build"],
+  "[dart]": {
+    "editor.formatOnSave": true,
+    "editor.rulers": [100],
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    }
+  }
+}
