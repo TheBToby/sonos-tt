@@ -5,20 +5,22 @@ import 'package:flutter/painting.dart';
 
 import '../services/artwork_cache.dart';
 
-/// Image provider that caches the decoded [ui.Image] by URL so that repeated
-/// provider instances for the same URL return the same image synchronously
-/// via [OneFrameImageStreamCompleter] — preventing flicker when the widget
-/// rebuilds every 16ms during the turntable spin animation.
+/// Image provider that caches the [ImageStreamCompleter] by URL so that
+/// repeated provider instances for the same URL return the **same**
+/// completer. This prevents Flutter's [Image] widget from creating a new
+/// stream on every 16 ms animation-frame rebuild, which would otherwise
+/// cause flickering and "disposed image" errors.
 ///
-/// The cached [ui.Image] is cloned before wrapping in [ImageInfo] so that
-/// [OneFrameImageStreamCompleter] can safely dispose its own handle without
-/// invalidating the cached original.
+/// [OneFrameImageStreamCompleter] cannot be used here because it disposes
+/// the image after a single delivery, making it incompatible with caching
+/// the decoded image across rebuilds.
 class ArtworkImageProvider extends ImageProvider<ArtworkImageProvider> {
   final String url;
   final ArtworkCache cache;
 
-  /// Static cache of decoded images keyed by URL.
-  static final Map<String, ui.Image> _imageCache = {};
+  /// Cache of stream completers keyed by URL.
+  /// [MultiFrameImageStreamCompleter] handles multiple listeners safely.
+  static final Map<String, ImageStreamCompleter> _completerCache = {};
 
   ArtworkImageProvider(this.url, this.cache);
 
@@ -28,54 +30,42 @@ class ArtworkImageProvider extends ImageProvider<ArtworkImageProvider> {
 
   @override
   ImageStreamCompleter loadImage(ArtworkImageProvider key, ImageDecoderCallback decode) {
-    // If we already have a decoded image for this URL, clone it and return
-    // it synchronously via OneFrameImageStreamCompleter. This avoids
-    // re-decoding the same bytes on every animation frame.
-    final cached = _imageCache[url];
-    if (cached != null) {
-      final cloned = cached.clone();
-      final imageInfo = ImageInfo(image: cloned, scale: 1.0);
-      return OneFrameImageStreamCompleter(
-        SynchronousFuture<ImageInfo>(imageInfo),
-        informationCollector: () sync* {
-          yield ErrorDescription('ArtworkImageProvider: cached $url');
-        },
-      );
-    }
+    final existing = _completerCache[url];
+    if (existing != null) return existing;
 
-    // First load: fetch bytes, decode, cache the image, then deliver it.
-    return OneFrameImageStreamCompleter(
-      _loadAndCache(decode),
+    final completer = MultiFrameImageStreamCompleter(
+      codec: _loadAsync(decode),
+      scale: 1.0,
       informationCollector: () sync* {
         yield ErrorDescription('ArtworkImageProvider: $url');
       },
     );
+    _completerCache[url] = completer;
+    return completer;
   }
 
-  Future<ImageInfo> _loadAndCache(ImageDecoderCallback decode) async {
-    final bytes = await cache.get(url);
-    if (bytes == null || bytes.isEmpty) {
-      throw Exception('No artwork data for $url');
+  Future<ui.Codec> _loadAsync(ImageDecoderCallback decode) async {
+    try {
+      final bytes = await cache.get(url);
+      if (bytes == null || bytes.isEmpty) {
+        _completerCache.remove(url);
+        throw Exception('No artwork data for $url');
+      }
+      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+      return decode(buffer);
+    } catch (e) {
+      _completerCache.remove(url);
+      rethrow;
     }
-    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-    final codec = await decode(buffer);
-    final frame = await codec.getNextFrame();
-    // Cache the decoded image for future rebuilds.
-    _imageCache[url] = frame.image;
-    return ImageInfo(image: frame.image, scale: 1.0);
   }
 
-  /// Remove a single URL from the image cache and dispose its image.
+  /// Remove a single URL from the completer cache.
   static void evictUrl(String url) {
-    final image = _imageCache.remove(url);
-    image?.dispose();
+    _completerCache.remove(url);
   }
 
-  /// Clear the entire image cache (e.g. on config change).
+  /// Clear the entire completer cache (e.g. on config change).
   static void clearCache() {
-    for (final image in _imageCache.values) {
-      image.dispose();
-    }
-    _imageCache.clear();
+    _completerCache.clear();
   }
 }
