@@ -491,7 +491,59 @@ class SonosApi {
     );
   }
 
-  // ---- Actions ---------------------------------------------------------------
+  // ---- Immediate commands (non-serialized, fire-and-forget) ------------------
+  // These bypass the serialization lock so user actions are never delayed
+  // behind a polling refresh. The polling loop will pick up state changes.
+
+  /// Sends a single command HTTP request immediately (not serialized).
+  Future<void> playCommand(AppConfig cfg, String speakerName) async {
+    if (_shouldUseMock(cfg)) {
+      _mock.playback['state'] = 'PLAYING';
+      return;
+    }
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/play', cfg.socoApi.timeout);
+  }
+
+  Future<void> pauseCommand(AppConfig cfg, String speakerName) async {
+    if (_shouldUseMock(cfg)) {
+      _mock.playback['state'] = 'PAUSED_PLAYBACK';
+      return;
+    }
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/pause', cfg.socoApi.timeout);
+  }
+
+  Future<void> nextCommand(AppConfig cfg, String speakerName) async {
+    if (_shouldUseMock(cfg)) {
+      _mock.playback['position'] = 0;
+      return;
+    }
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/next', cfg.socoApi.timeout);
+  }
+
+  Future<void> previousCommand(AppConfig cfg, String speakerName) async {
+    if (_shouldUseMock(cfg)) {
+      _mock.playback['position'] = 0;
+      return;
+    }
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/previous', cfg.socoApi.timeout);
+  }
+
+  Future<void> setVolumeCommand(AppConfig cfg, String speakerName, int volume) async {
+    final v = volume.clamp(0, 100);
+    if (_shouldUseMock(cfg)) {
+      final sp = _mock.speakers.where((s) => s['name'] == speakerName).firstOrNull;
+      if (sp != null) sp['volume'] = v;
+      return;
+    }
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/volume/$v', cfg.socoApi.timeout);
+  }
+
+  // ---- Legacy actions (serialized, used for complex multi-step ops) ----------
 
   Future<Map<String, dynamic>?> play(AppConfig cfg, String speakerName) {
     return _serialized(() => _playImpl(cfg, speakerName));

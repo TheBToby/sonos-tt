@@ -42,7 +42,24 @@ class SonosRepository {
     return cached;
   }
 
-  // ---- Actions (delegate to API, cache the refresh result) ----
+  // ---- Immediate commands (non-serialized, for instant UI response) ----
+
+  /// Send a play command immediately, bypassing the serialization lock.
+  /// The polling loop will pick up the state change.
+  Future<void> playCommand(AppConfig cfg, String speakerName) => _api.playCommand(cfg, speakerName);
+
+  Future<void> pauseCommand(AppConfig cfg, String speakerName) =>
+      _api.pauseCommand(cfg, speakerName);
+
+  Future<void> nextCommand(AppConfig cfg, String speakerName) => _api.nextCommand(cfg, speakerName);
+
+  Future<void> previousCommand(AppConfig cfg, String speakerName) =>
+      _api.previousCommand(cfg, speakerName);
+
+  Future<void> setVolumeCommand(AppConfig cfg, String speakerName, int volume) =>
+      _api.setVolumeCommand(cfg, speakerName, volume);
+
+  // ---- Serialized actions (for complex multi-step ops) ----
 
   Future<Map<String, dynamic>?> play(AppConfig cfg, String speakerName) async {
     final data = await _api.play(cfg, speakerName);

@@ -181,9 +181,9 @@ class AppState extends ChangeNotifier {
     if (name == null) return;
     try {
       if (_sonos.activePlayback.isPlaying) {
-        await api.pause(_config, name);
+        await api.pauseCommand(_config, name);
       } else {
-        await api.play(_config, name);
+        await api.playCommand(_config, name);
       }
     } catch (e) {
       showToast('connection.error');
@@ -194,7 +194,7 @@ class AppState extends ChangeNotifier {
     final name = _sonos.activeSpeaker?.name;
     if (name == null) return;
     try {
-      await api.next(_config, name);
+      await api.nextCommand(_config, name);
     } catch (e) {
       showToast('connection.error');
     }
@@ -204,7 +204,7 @@ class AppState extends ChangeNotifier {
     final name = _sonos.activeSpeaker?.name;
     if (name == null) return;
     try {
-      await api.previous(_config, name);
+      await api.previousCommand(_config, name);
     } catch (e) {
       showToast('connection.error');
     }
@@ -214,7 +214,7 @@ class AppState extends ChangeNotifier {
     final name = _sonos.activeSpeaker?.name;
     if (name == null) return;
     try {
-      await api.setVolume(_config, name, volume);
+      await api.setVolumeCommand(_config, name, volume);
     } catch (e) {
       showToast('connection.error');
     }
