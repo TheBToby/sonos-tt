@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
+
 import 'models/app_config.dart';
 import 'models/sonos_models.dart';
-import 'services/config_service.dart';
-import 'services/sonos_api.dart';
+import 'repositories/sonos_repository.dart';
 import 'services/artwork_cache.dart';
+import 'services/config_service.dart';
 
 /// View enum matching the Svelte $view store.
 enum AppView { turntable, speakers, playlists, users, settings, screensaver }
 
 class AppState extends ChangeNotifier {
-  final SonosApi api = SonosApi();
+  final SonosRepository api = SonosRepository();
   final ConfigService configService = ConfigService();
   final ArtworkCache artworkCache = ArtworkCache();
 
@@ -28,8 +29,8 @@ class AppState extends ChangeNotifier {
   String _toastMessage = '';
   DateTime? _toastAt;
   String get toastMessage => _toastMessage;
-  bool get toastVisible => _toastAt != null &&
-      DateTime.now().difference(_toastAt!) < const Duration(milliseconds: 2500);
+  bool get toastVisible =>
+      _toastAt != null && DateTime.now().difference(_toastAt!) < const Duration(milliseconds: 2500);
 
   String? _volumeMode;
   String? get volumeMode => _volumeMode;
@@ -66,15 +67,31 @@ class AppState extends ChangeNotifier {
     final newPlayback = data['playback'] as Playback? ?? const Playback();
     final newPlaylists = data['playlists'] as List<PlaylistItem>? ?? [];
 
-    // Auto-set active speaker on first load
-    String? activeUid = _sonos.activeSpeakerUid;
-    activeUid ??= data['speakerUid'] as String?;
-    activeUid ??= newSpeakers.firstOrNull?.uid;
+    // dataSpeakerUid is the speaker whose playback was actually fetched by the API.
+    // This may differ from the user's selected speaker (e.g., user picked a group
+    // member but the API resolved to the coordinator).
+    final dataSpeakerUid = data['speakerUid'] as String?;
+
+    // Only auto-set activeSpeakerUid on the very first load (no prior selection).
+    // After that, the active speaker is only changed by explicit setActiveSpeaker().
+    String? activeUid = _sonos.activeSpeakerUid ?? dataSpeakerUid ?? newSpeakers.firstOrNull?.uid;
 
     if (activeUid != null) {
       final existingStates = Map<String, SpeakerState>.from(_sonos.speakerStates);
-      existingStates[activeUid] = (existingStates[activeUid] ?? const SpeakerState())
-          .copyWith(playback: newPlayback, playlists: newPlaylists);
+
+      // Store playback under the data's speaker (correct data ownership).
+      if (dataSpeakerUid != null) {
+        existingStates[dataSpeakerUid] = (existingStates[dataSpeakerUid] ?? const SpeakerState())
+            .copyWith(playback: newPlayback, playlists: newPlaylists);
+      }
+
+      // If the active speaker differs from the data speaker (e.g., active is a
+      // group member, data is from the coordinator), also mirror the playback
+      // under the active speaker's key so activePlayback always returns data.
+      if (activeUid != dataSpeakerUid) {
+        existingStates[activeUid] = (existingStates[activeUid] ?? const SpeakerState())
+            .copyWith(playback: newPlayback, playlists: newPlaylists);
+      }
 
       _sonos = _sonos.copyWith(
         speakers: newSpeakers,
@@ -97,8 +114,7 @@ class AppState extends ChangeNotifier {
     );
 
     // Preload artwork
-    if (newPlayback.artworkUrl.isNotEmpty &&
-        !artworkCache.isReady(newPlayback.artworkUrl)) {
+    if (newPlayback.artworkUrl.isNotEmpty && !artworkCache.isReady(newPlayback.artworkUrl)) {
       artworkCache.get(newPlayback.artworkUrl);
     }
 
@@ -146,8 +162,7 @@ class AppState extends ChangeNotifier {
     // Auto-hide
     Future.delayed(const Duration(milliseconds: 2500), () {
       if (_toastAt != null &&
-          DateTime.now().difference(_toastAt!) >=
-              const Duration(milliseconds: 2400)) {
+          DateTime.now().difference(_toastAt!) >= const Duration(milliseconds: 2400)) {
         _toastAt = null;
         notifyListeners();
       }
@@ -207,13 +222,14 @@ class AppState extends ChangeNotifier {
 
   Future<void> setActiveSpeaker(String uid) async {
     _sonos = _sonos.copyWith(activeSpeakerUid: uid);
+    // Return cached data immediately for instant display
+    final cached = api.getCachedOrRefresh(
+      _config,
+      uid,
+      onRefreshed: (data) => _handleUpdate(data),
+    );
+    if (cached != null) _handleUpdate(cached);
     notifyListeners();
-    try {
-      final data = await api.refresh(_config, uid);
-      if (data != null) _handleUpdate(data);
-    } catch (e) {
-      showToast('connection.error');
-    }
   }
 
   Future<void> groupSpeakers(String coord, String member) async {
@@ -250,8 +266,8 @@ class AppState extends ChangeNotifier {
       final playlists = await api.fetchPlaylists(_config, name);
       final queue = await api.fetchQueue(_config, name);
       final states = Map<String, SpeakerState>.from(_sonos.speakerStates);
-      states[name] = (states[name] ?? const SpeakerState())
-          .copyWith(playlists: playlists, queue: queue);
+      states[name] =
+          (states[name] ?? const SpeakerState()).copyWith(playlists: playlists, queue: queue);
       _sonos = _sonos.copyWith(speakerStates: states);
       notifyListeners();
     } catch (e) {

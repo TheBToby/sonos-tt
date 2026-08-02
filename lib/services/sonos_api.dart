@@ -5,9 +5,11 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../models/sonos_models.dart';
+
 import '../models/app_config.dart';
+import '../models/sonos_models.dart';
 
 // ---------------------------------------------------------------------------
 // Parsing helpers (pure functions, ported from JS)
@@ -108,8 +110,7 @@ List<Map<String, dynamic>> parseGroupsResult(String? text) {
 // HTTP helper
 // ---------------------------------------------------------------------------
 
-Future<Map<String, dynamic>> apiGet(
-    String baseUrl, String path, int timeoutMs) async {
+Future<Map<String, dynamic>> apiGet(String baseUrl, String path, int timeoutMs) async {
   final client = HttpClient();
   client.connectionTimeout = Duration(milliseconds: timeoutMs);
   try {
@@ -117,9 +118,9 @@ Future<Map<String, dynamic>> apiGet(
     final request = await client.getUrl(uri);
     request.headers.set('Accept', 'application/json');
     final response = await request.close().timeout(
-      Duration(milliseconds: timeoutMs),
-      onTimeout: () => throw Exception('timeout'),
-    );
+          Duration(milliseconds: timeoutMs),
+          onTimeout: () => throw Exception('timeout'),
+        );
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode} ${response.reasonPhrase}');
     }
@@ -205,20 +206,30 @@ class SonosApi {
   bool _fallbackToMock = false;
   Timer? _pollTimer;
 
+  // Mutex: ensures all API calls run sequentially — no parallel requests to
+  // the SoCo-CLI server, which prevents out-of-order responses from
+  // overwriting each other and causing flickering playback data.
+  Future<void> _lock = Future.value();
+
+  Future<T> _serialized<T>(Future<T> Function() fn) {
+    final prev = _lock;
+    final completer = Completer<void>();
+    _lock = completer.future;
+    return prev.then((_) => fn()).whenComplete(() => completer.complete());
+  }
+
   // Rare data cache
   List<Map<String, dynamic>>? _groupsCache;
   List<PlaylistItem>? _playlistsCache;
   int _pollCount = 0;
   static const _rareDataTtlPolls = 15;
 
-  bool isMock(String baseUrl) =>
-      baseUrl.isEmpty || baseUrl.startsWith('mock://');
+  bool isMock(String baseUrl) => baseUrl.isEmpty || baseUrl.startsWith('mock://');
 
   /// Whether we've fallen back to mock mode after repeated failures.
   bool get hasFallenBackToMock => _fallbackToMock;
 
-  bool _shouldUseMock(AppConfig cfg) =>
-      isMock(cfg.socoApi.baseUrl) || _fallbackToMock || kIsWeb;
+  bool _shouldUseMock(AppConfig cfg) => isMock(cfg.socoApi.baseUrl) || _fallbackToMock || kIsWeb;
 
   void resetRareDataCache() {
     _groupsCache = null;
@@ -233,8 +244,11 @@ class SonosApi {
 
   // ---- Refresh (polling) ---------------------------------------------------
 
-  Future<Map<String, dynamic>?> refresh(
-      AppConfig cfg, String? activeSpeakerName) async {
+  Future<Map<String, dynamic>?> refresh(AppConfig cfg, String? activeSpeakerName) {
+    return _serialized(() => _refreshImpl(cfg, activeSpeakerName));
+  }
+
+  Future<Map<String, dynamic>?> _refreshImpl(AppConfig cfg, String? activeSpeakerName) async {
     final useMock = _shouldUseMock(cfg);
 
     try {
@@ -248,12 +262,9 @@ class SonosApi {
         }
       } else {
         // 1. Get speaker list
-        final speakersRes =
-            await apiGet(cfg.socoApi.baseUrl, '/speakers', cfg.socoApi.timeout);
-        final speakerNames = (speakersRes['speakers'] as List<dynamic>?)
-                ?.map((e) => e as String)
-                .toList() ??
-            [];
+        final speakersRes = await apiGet(cfg.socoApi.baseUrl, '/speakers', cfg.socoApi.timeout);
+        final speakerNames =
+            (speakersRes['speakers'] as List<dynamic>?)?.map((e) => e as String).toList() ?? [];
         if (speakerNames.isEmpty) throw Exception('No speakers found');
         activeSpeakerName ??= speakerNames.first;
 
@@ -263,8 +274,7 @@ class SonosApi {
           final enc = Uri.encodeComponent(name);
           int volume = 0;
           try {
-            final volRes = await apiGet(
-                cfg.socoApi.baseUrl, '/$enc/volume', cfg.socoApi.timeout);
+            final volRes = await apiGet(cfg.socoApi.baseUrl, '/$enc/volume', cfg.socoApi.timeout);
             volume = parseVolumeResult(volRes['result'] as String?);
           } catch (_) {
             volume = 0;
@@ -279,33 +289,40 @@ class SonosApi {
           String st = 'STOPPED';
           Map<String, dynamic> ti = {};
           try {
-            final stateRes = await apiGet(
-                cfg.socoApi.baseUrl, '/$enc/state', cfg.socoApi.timeout);
+            final stateRes = await apiGet(cfg.socoApi.baseUrl, '/$enc/state', cfg.socoApi.timeout);
             if (stateRes['exit_code'] != 0 &&
                 (stateRes['error_msg'] as String?)?.isNotEmpty == true) {
               continue;
             }
             st = stateRes['result'] as String? ?? 'STOPPED';
-          } catch (_) { continue; }
+          } catch (_) {
+            continue;
+          }
 
           try {
-            final trackRes = await apiGet(
-                cfg.socoApi.baseUrl, '/$enc/track', cfg.socoApi.timeout);
+            final trackRes = await apiGet(cfg.socoApi.baseUrl, '/$enc/track', cfg.socoApi.timeout);
             ti = parseTrackResult(trackRes['result'] as String?);
           } catch (_) {}
 
           try {
-            final artRes = await apiGet(
-                cfg.socoApi.baseUrl, '/$enc/album_art', cfg.socoApi.timeout);
+            final artRes =
+                await apiGet(cfg.socoApi.baseUrl, '/$enc/album_art', cfg.socoApi.timeout);
             final artUrl = (artRes['result'] as String?)?.trim() ?? '';
-            if ((ti['artworkUrl'] == null || (ti['artworkUrl'] as String).isEmpty) && artUrl.startsWith('http')) {
+            if ((ti['artworkUrl'] == null || (ti['artworkUrl'] as String).isEmpty) &&
+                artUrl.startsWith('http')) {
               ti['artworkUrl'] = artUrl;
             }
           } catch (_) {}
 
           final parsedState = parseStateResult(st);
           final hasTrackInfo = (ti['title'] as String?)?.isNotEmpty == true;
-          probed.add({'name': name, 'state': parsedState, 'stateText': st, 'trackInfo': ti, 'hasTrackInfo': hasTrackInfo});
+          probed.add({
+            'name': name,
+            'state': parsedState,
+            'stateText': st,
+            'trackInfo': ti,
+            'hasTrackInfo': hasTrackInfo
+          });
         }
 
         if (probed.isEmpty) {
@@ -317,8 +334,11 @@ class SonosApi {
         final active = probed.where((p) => p['name'] == activeSpeakerName).firstOrNull;
         String? workingSpeaker = active != null ? (active['name'] as String?) : null;
         // Auto-select: only when no active speaker was specified
-        workingSpeaker ??= probed.where((p) => p['state'] == 'PLAYING' && p['hasTrackInfo'] == true).firstOrNull?['name'] as String?;
-        workingSpeaker ??= probed.where((p) => p['hasTrackInfo'] == true).firstOrNull?['name'] as String?;
+        workingSpeaker ??= probed
+            .where((p) => p['state'] == 'PLAYING' && p['hasTrackInfo'] == true)
+            .firstOrNull?['name'] as String?;
+        workingSpeaker ??=
+            probed.where((p) => p['hasTrackInfo'] == true).firstOrNull?['name'] as String?;
         workingSpeaker ??= probed.first['name'] as String;
 
         final chosen = probed.firstWhere((p) => p['name'] == workingSpeaker);
@@ -329,21 +349,19 @@ class SonosApi {
 
         // 4. Rare data
         _pollCount++;
-        final needRare = _pollCount % _rareDataTtlPolls == 0 ||
-            _groupsCache == null ||
-            _playlistsCache == null;
+        final needRare =
+            _pollCount % _rareDataTtlPolls == 0 || _groupsCache == null || _playlistsCache == null;
 
         if (needRare) {
           try {
-            final groupsRes = await apiGet(
-                cfg.socoApi.baseUrl, '/$encActive/groups', cfg.socoApi.timeout);
+            final groupsRes =
+                await apiGet(cfg.socoApi.baseUrl, '/$encActive/groups', cfg.socoApi.timeout);
             _groupsCache = parseGroupsResult(groupsRes['result'] as String?);
           } catch (_) {}
           try {
-            final playlistsRes = await apiGet(cfg.socoApi.baseUrl,
-                '/$encActive/playlists', cfg.socoApi.timeout);
-            _playlistsCache =
-                parsePlaylistsResult(playlistsRes['result'] as String?);
+            final playlistsRes =
+                await apiGet(cfg.socoApi.baseUrl, '/$encActive/playlists', cfg.socoApi.timeout);
+            _playlistsCache = parsePlaylistsResult(playlistsRes['result'] as String?);
           } catch (_) {}
         }
 
@@ -355,7 +373,8 @@ class SonosApi {
             ...trackInfo,
           },
           'queue': <dynamic>[],
-          'playlists': _playlistsCache?.map((p) => {'title': p.title, 'item_id': p.itemId}).toList() ?? [],
+          'playlists':
+              _playlistsCache?.map((p) => {'title': p.title, 'item_id': p.itemId}).toList() ?? [],
         };
       }
 
@@ -378,8 +397,8 @@ class SonosApi {
         'playback': speakerPlayback,
         'speakers': (data['speakers'] as List).map((sp) {
           final m = sp as Map<String, dynamic>;
-          final group = groupLookup[m['name'] as String] ??
-              {'isCoordinator': true, 'groupLabel': m['name']};
+          final group =
+              groupLookup[m['name'] as String] ?? {'isCoordinator': true, 'groupLabel': m['name']};
           return Speaker(
             uid: m['name'] as String,
             name: m['name'] as String,
@@ -398,27 +417,26 @@ class SonosApi {
           );
         }).toList(),
         'playlists': (data['playlists'] as List?)?.map((p) {
-          final pm = p as Map<String, dynamic>;
-          return PlaylistItem(
-            title: pm['title'] as String,
-            itemId: pm['item_id'] as int,
-          );
-        }).toList() ?? [],
+              final pm = p as Map<String, dynamic>;
+              return PlaylistItem(
+                title: pm['title'] as String,
+                itemId: pm['item_id'] as int,
+              );
+            }).toList() ??
+            [],
       };
     } catch (err) {
       _consecutiveFailures++;
-      if (!isMock(cfg.socoApi.baseUrl) &&
-          !_fallbackToMock &&
-          _consecutiveFailures >= 5) {
+      if (!isMock(cfg.socoApi.baseUrl) && !_fallbackToMock && _consecutiveFailures >= 5) {
         _fallbackToMock = true;
-        print('[sonosApi] SoCo-CLI unreachable after $_consecutiveFailures attempts — falling back to mock mode.');
-        return refresh(cfg, activeSpeakerName);
+        print(
+            '[sonosApi] SoCo-CLI unreachable after $_consecutiveFailures attempts — falling back to mock mode.');
+        return _refreshImpl(cfg, activeSpeakerName);
       }
 
       if (_fallbackToMock) {
         _mock.tick();
-        final activeName =
-            activeSpeakerName ?? (_mock.speakers as List).firstOrNull?['name'];
+        final activeName = activeSpeakerName ?? (_mock.speakers as List).firstOrNull?['name'];
         return {
           'speakerUid': activeName,
           'playback': _buildPlayback(_mock.playback),
@@ -475,69 +493,84 @@ class SonosApi {
 
   // ---- Actions ---------------------------------------------------------------
 
-  Future<Map<String, dynamic>?> play(
-      AppConfig cfg, String speakerName) async {
+  Future<Map<String, dynamic>?> play(AppConfig cfg, String speakerName) {
+    return _serialized(() => _playImpl(cfg, speakerName));
+  }
+
+  Future<Map<String, dynamic>?> _playImpl(AppConfig cfg, String speakerName) async {
     if (_shouldUseMock(cfg)) {
       _mock.playback['state'] = 'PLAYING';
-      return refresh(cfg, speakerName);
+      return _refreshImpl(cfg, speakerName);
     }
-    await apiGet(cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/play', cfg.socoApi.timeout);
-    return refresh(cfg, speakerName);
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/play', cfg.socoApi.timeout);
+    return _refreshImpl(cfg, speakerName);
   }
 
-  Future<Map<String, dynamic>?> pause(
-      AppConfig cfg, String speakerName) async {
+  Future<Map<String, dynamic>?> pause(AppConfig cfg, String speakerName) {
+    return _serialized(() => _pauseImpl(cfg, speakerName));
+  }
+
+  Future<Map<String, dynamic>?> _pauseImpl(AppConfig cfg, String speakerName) async {
     if (_shouldUseMock(cfg)) {
       _mock.playback['state'] = 'PAUSED_PLAYBACK';
-      return refresh(cfg, speakerName);
+      return _refreshImpl(cfg, speakerName);
     }
-    await apiGet(cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/pause', cfg.socoApi.timeout);
-    return refresh(cfg, speakerName);
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/pause', cfg.socoApi.timeout);
+    return _refreshImpl(cfg, speakerName);
   }
 
-  Future<Map<String, dynamic>?> next(
-      AppConfig cfg, String speakerName) async {
+  Future<Map<String, dynamic>?> next(AppConfig cfg, String speakerName) {
+    return _serialized(() => _nextImpl(cfg, speakerName));
+  }
+
+  Future<Map<String, dynamic>?> _nextImpl(AppConfig cfg, String speakerName) async {
     if (_shouldUseMock(cfg)) {
       _mock.playback['position'] = 0;
-      return refresh(cfg, speakerName);
+      return _refreshImpl(cfg, speakerName);
     }
-    await apiGet(cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/next', cfg.socoApi.timeout);
-    return refresh(cfg, speakerName);
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/next', cfg.socoApi.timeout);
+    return _refreshImpl(cfg, speakerName);
   }
 
-  Future<Map<String, dynamic>?> previous(
-      AppConfig cfg, String speakerName) async {
+  Future<Map<String, dynamic>?> previous(AppConfig cfg, String speakerName) {
+    return _serialized(() => _previousImpl(cfg, speakerName));
+  }
+
+  Future<Map<String, dynamic>?> _previousImpl(AppConfig cfg, String speakerName) async {
     if (_shouldUseMock(cfg)) {
       _mock.playback['position'] = 0;
-      return refresh(cfg, speakerName);
+      return _refreshImpl(cfg, speakerName);
     }
-    await apiGet(cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/previous', cfg.socoApi.timeout);
-    return refresh(cfg, speakerName);
+    await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/previous', cfg.socoApi.timeout);
+    return _refreshImpl(cfg, speakerName);
   }
 
-  Future<Map<String, dynamic>?> setVolume(
+  Future<Map<String, dynamic>?> setVolume(AppConfig cfg, String speakerName, int volume) {
+    return _serialized(() => _setVolumeImpl(cfg, speakerName, volume));
+  }
+
+  Future<Map<String, dynamic>?> _setVolumeImpl(
       AppConfig cfg, String speakerName, int volume) async {
     final v = volume.clamp(0, 100);
     if (_shouldUseMock(cfg)) {
-      final sp = _mock.speakers
-          .where((s) => s['name'] == speakerName)
-          .firstOrNull;
+      final sp = _mock.speakers.where((s) => s['name'] == speakerName).firstOrNull;
       if (sp != null) sp['volume'] = v;
-      return refresh(cfg, speakerName);
+      return _refreshImpl(cfg, speakerName);
     }
     await apiGet(
-        cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/volume/$v',
-        cfg.socoApi.timeout);
-    return refresh(cfg, speakerName);
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/volume/$v', cfg.socoApi.timeout);
+    return _refreshImpl(cfg, speakerName);
   }
 
-  Future<List<QueueItem>> fetchQueue(
-      AppConfig cfg, String speakerName) async {
+  Future<List<QueueItem>> fetchQueue(AppConfig cfg, String speakerName) {
+    return _serialized(() => _fetchQueueImpl(cfg, speakerName));
+  }
+
+  Future<List<QueueItem>> _fetchQueueImpl(AppConfig cfg, String speakerName) async {
     if (_shouldUseMock(cfg)) {
       return (_mock.queue as List)
           .map((q) => QueueItem(
@@ -546,13 +579,16 @@ class SonosApi {
               ))
           .toList();
     }
-    final res = await apiGet(cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/queue', cfg.socoApi.timeout);
+    final res = await apiGet(
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/queue', cfg.socoApi.timeout);
     return parseQueueResult(res['result'] as String?);
   }
 
-  Future<List<PlaylistItem>> fetchPlaylists(
-      AppConfig cfg, String speakerName) async {
+  Future<List<PlaylistItem>> fetchPlaylists(AppConfig cfg, String speakerName) {
+    return _serialized(() => _fetchPlaylistsImpl(cfg, speakerName));
+  }
+
+  Future<List<PlaylistItem>> _fetchPlaylistsImpl(AppConfig cfg, String speakerName) async {
     if (_shouldUseMock(cfg)) {
       return (_mock.playlists as List)
           .map((p) => PlaylistItem(
@@ -562,78 +598,85 @@ class SonosApi {
           .toList();
     }
     final res = await apiGet(
-        cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/playlists',
-        cfg.socoApi.timeout);
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/playlists', cfg.socoApi.timeout);
     return parsePlaylistsResult(res['result'] as String?);
   }
 
   Future<Map<String, dynamic>?> playPlaylist(
+      AppConfig cfg, String speakerName, String playlistName) {
+    return _serialized(() => _playPlaylistImpl(cfg, speakerName, playlistName));
+  }
+
+  Future<Map<String, dynamic>?> _playPlaylistImpl(
       AppConfig cfg, String speakerName, String playlistName) async {
     if (_shouldUseMock(cfg)) {
       _mock.playback['state'] = 'PLAYING';
-      final pl = _mock.playlists
-          .where((p) => (p)['title'] == playlistName)
-          .firstOrNull;
+      final pl = _mock.playlists.where((p) => (p)['title'] == playlistName).firstOrNull;
       if (pl != null) _mock.playback['title'] = pl['title'];
-      return refresh(cfg, speakerName);
+      return _refreshImpl(cfg, speakerName);
     }
     try {
-      await apiGet(
-          cfg.socoApi.baseUrl,
-          '/${Uri.encodeComponent(speakerName)}/clear_queue',
+      await apiGet(cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/clear_queue',
           cfg.socoApi.timeout);
     } catch (_) {}
     await apiGet(
         cfg.socoApi.baseUrl,
         '/${Uri.encodeComponent(speakerName)}/add_playlist_to_queue/${Uri.encodeComponent(playlistName)}',
         cfg.socoApi.timeout);
-    await apiGet(
-        cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/play_from_queue/1',
+    await apiGet(cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/play_from_queue/1',
         cfg.socoApi.timeout);
-    return refresh(cfg, speakerName);
+    return _refreshImpl(cfg, speakerName);
   }
 
   Future<Map<String, dynamic>?> groupSpeakers(
+      AppConfig cfg, String coordinatorName, String memberName) {
+    return _serialized(() => _groupSpeakersImpl(cfg, coordinatorName, memberName));
+  }
+
+  Future<Map<String, dynamic>?> _groupSpeakersImpl(
       AppConfig cfg, String coordinatorName, String memberName) async {
     if (_shouldUseMock(cfg)) {
       var g = _mock.groups.where((x) => x['coordinator'] == coordinatorName).firstOrNull;
       if (g == null) {
-        g = {'coordinator': coordinatorName, 'members': [coordinatorName]};
+        g = {
+          'coordinator': coordinatorName,
+          'members': [coordinatorName]
+        };
         _mock.groups.add(g);
       }
       if (!(g['members'] as List).contains(memberName)) {
         (g['members'] as List).add(memberName);
       }
-      return refresh(cfg, coordinatorName);
+      return _refreshImpl(cfg, coordinatorName);
     }
     await apiGet(
         cfg.socoApi.baseUrl,
         '/${Uri.encodeComponent(memberName)}/group/${Uri.encodeComponent(coordinatorName)}',
         cfg.socoApi.timeout);
-    return refresh(cfg, coordinatorName);
+    return _refreshImpl(cfg, coordinatorName);
   }
 
-  Future<Map<String, dynamic>?> ungroupSpeaker(
-      AppConfig cfg, String speakerName) async {
+  Future<Map<String, dynamic>?> ungroupSpeaker(AppConfig cfg, String speakerName) {
+    return _serialized(() => _ungroupSpeakerImpl(cfg, speakerName));
+  }
+
+  Future<Map<String, dynamic>?> _ungroupSpeakerImpl(AppConfig cfg, String speakerName) async {
     if (_shouldUseMock(cfg)) {
       for (final g in _mock.groups) {
         (g['members'] as List).remove(speakerName);
       }
-      _mock.groups
-          .add({'coordinator': speakerName, 'members': [speakerName]});
-      return refresh(cfg, speakerName);
+      _mock.groups.add({
+        'coordinator': speakerName,
+        'members': [speakerName]
+      });
+      return _refreshImpl(cfg, speakerName);
     }
     await apiGet(
-        cfg.socoApi.baseUrl,
-        '/${Uri.encodeComponent(speakerName)}/ungroup',
-        cfg.socoApi.timeout);
-    return refresh(cfg, speakerName);
+        cfg.socoApi.baseUrl, '/${Uri.encodeComponent(speakerName)}/ungroup', cfg.socoApi.timeout);
+    return _refreshImpl(cfg, speakerName);
   }
 
-  Future<void> switchSpotifyAccount(
-      AppConfig cfg, String speakerName, String account) async {
+  Future<void> switchSpotifyAccount(AppConfig cfg, String speakerName, String account) async {
     // SoCo-CLI doesn't have a direct Spotify account switch in the HTTP API
     // Return a message for the caller to show as toast
   }
