@@ -5,6 +5,7 @@ import 'models/sonos_models.dart';
 import 'repositories/sonos_repository.dart';
 import 'services/artwork_cache.dart';
 import 'services/config_service.dart';
+import 'services/sonos_event_service.dart';
 
 /// View enum matching the Svelte $view store.
 enum AppView { turntable, speakers, playlists, users, settings, screensaver }
@@ -13,6 +14,7 @@ class AppState extends ChangeNotifier {
   final SonosRepository api = SonosRepository();
   final ConfigService configService = ConfigService();
   final ArtworkCache artworkCache = ArtworkCache();
+  SonosEventService? _eventService;
 
   AppConfig _config = const AppConfig();
   AppConfig get config => _config;
@@ -48,8 +50,60 @@ class AppState extends ChangeNotifier {
   Future<void> _init() async {
     _config = await configService.loadConfig();
     _startPolling();
+    _startEventService();
     _initialized = true;
     notifyListeners();
+  }
+
+  void _startEventService() {
+    final service = SonosEventService(
+      onEvent: _handleSonosEvent,
+      onConnectionChange: (connected) {
+        // Silent — events are a bonus; polling is the backbone.
+        // Could surface a "real-time connected" indicator in the UI later.
+      },
+    );
+    _eventService = service;
+    service.connect(_config.socoApi.baseUrl);
+  }
+
+  /// Handle a real-time event from the Sonos WebSocket.
+  ///
+  /// If the event is for the active speaker (or any speaker when topology
+  /// changes), trigger an immediate debounced refresh to pick up the new state
+  /// without waiting for the next polling tick.
+  void _handleSonosEvent(SonosEvent event) {
+    final activeUid = _sonos.activeSpeakerUid;
+
+    switch (event.type) {
+      case SonosEventType.playback:
+        // Track/play state changed. Only refresh if it's for the active
+        // speaker (or no speaker specified — refresh anyway to be safe).
+        if (event.speaker == null || event.speaker == activeUid) {
+          api.triggerImmediateRefresh();
+        }
+        break;
+
+      case SonosEventType.volume:
+        // Volume changed. Refresh to update the speaker list volumes.
+        api.triggerImmediateRefresh();
+        break;
+
+      case SonosEventType.topology:
+        // Groups changed (speaker joined/left/regrouped). Always refresh
+        // to update the speakers list and group structure.
+        api.triggerImmediateRefresh();
+        break;
+
+      case SonosEventType.speaker:
+      case SonosEventType.unknown:
+        // Generic or unknown event — refresh to be safe, but only if the
+        // active speaker might be affected.
+        if (event.speaker == null || event.speaker == activeUid) {
+          api.triggerImmediateRefresh();
+        }
+        break;
+    }
   }
 
   void _startPolling() {
@@ -368,6 +422,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _eventService?.dispose();
     api.stopPolling();
     super.dispose();
   }
