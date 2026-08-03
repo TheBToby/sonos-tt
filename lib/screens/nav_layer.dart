@@ -37,7 +37,7 @@ class NavLayer extends StatelessWidget {
   void _handleSegmentTap(AppState state, String label) {
     switch (label) {
       case 'volume':
-        state.setVolumeMode(state.volumeMode == 'ring' ? null : 'ring');
+        state.showVolumeControl();
         break;
       case 'next':
         state.nextTrack();

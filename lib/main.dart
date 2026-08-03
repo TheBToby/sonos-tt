@@ -11,6 +11,7 @@ import 'screens/nav_layer.dart';
 import 'screens/screensaver_layer.dart';
 import 'screens/toast_layer.dart';
 import 'screens/turntable_screen.dart';
+import 'screens/volume_control_layer.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,6 +66,7 @@ class CircularShell extends StatefulWidget {
 class _CircularShellState extends State<CircularShell> {
   DateTime? _lastInteraction;
   Timer? _screensaverTimer;
+  final _activePointers = <int>{};
 
   @override
   void initState() {
@@ -95,6 +97,19 @@ class _CircularShellState extends State<CircularShell> {
     _lastInteraction = DateTime.now();
   }
 
+  void _handlePointerDown(PointerDownEvent event) {
+    _activePointers.add(event.pointer);
+    _onInteraction();
+    // 3-finger touch anywhere shows the volume control overlay.
+    if (_activePointers.length >= 3) {
+      context.read<AppState>().showVolumeControl();
+    }
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    _activePointers.remove(event.pointer);
+  }
+
   @override
   void dispose() {
     _screensaverTimer?.cancel();
@@ -110,18 +125,24 @@ class _CircularShellState extends State<CircularShell> {
           width: size,
           height: size,
           child: ClipOval(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTapDown: (_) => _onInteraction(),
-              onPanStart: (_) => _onInteraction(),
-              child: const Stack(
-                children: [
-                  TurntableLayer(),
-                  NavLayer(),
-                  DialogLayer(),
-                  ScreensaverLayer(),
-                  ToastLayer(),
-                ],
+            child: Listener(
+              onPointerDown: _handlePointerDown,
+              onPointerUp: _handlePointerUp,
+              onPointerCancel: (e) => _activePointers.remove(e.pointer),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (_) => _onInteraction(),
+                onPanStart: (_) => _onInteraction(),
+                child: const Stack(
+                  children: [
+                    TurntableLayer(),
+                    NavLayer(),
+                    VolumeControlLayer(),
+                    DialogLayer(),
+                    ScreensaverLayer(),
+                    ToastLayer(),
+                  ],
+                ),
               ),
             ),
           ),

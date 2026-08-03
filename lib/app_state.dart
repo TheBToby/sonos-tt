@@ -37,6 +37,9 @@ class AppState extends ChangeNotifier {
   String? _volumeMode;
   String? get volumeMode => _volumeMode;
 
+  bool _volumeControlVisible = false;
+  bool get volumeControlVisible => _volumeControlVisible;
+
   // --- Optimistic play state (for instant UI response on play/pause) ---
   String? _optimisticPlayState;
   DateTime? _optimisticAppliedAt;
@@ -126,6 +129,10 @@ class AppState extends ChangeNotifier {
     final newPlayback = data['playback'] as Playback? ?? const Playback();
     final newPlaylists = data['playlists'] as List<PlaylistItem>? ?? [];
 
+    // Per-speaker playbacks from probing all speakers during the poll.
+    // This lets us cache every speaker's metadata so switching is instant.
+    final playbacks = data['playbacks'] as Map<String, Playback>? ?? {};
+
     // dataSpeakerUid is the speaker whose playback was actually fetched by the API.
     // This may differ from the user's selected speaker (e.g., user picked a group
     // member but the API resolved to the coordinator).
@@ -138,29 +145,62 @@ class AppState extends ChangeNotifier {
     if (activeUid != null) {
       final existingStates = Map<String, SpeakerState>.from(_sonos.speakerStates);
 
-      // Store playback under the data's speaker (correct data ownership).
-      if (dataSpeakerUid != null) {
-        existingStates[dataSpeakerUid] = (existingStates[dataSpeakerUid] ?? const SpeakerState())
-            .copyWith(playback: newPlayback, playlists: newPlaylists);
+      // Store per-speaker playbacks from the poll so every speaker has fresh
+      // metadata. This makes switching the active speaker instant.
+      for (final entry in playbacks.entries) {
+        final speakerUid = entry.key;
+        final pb = entry.value;
+        final existing = existingStates[speakerUid] ?? const SpeakerState();
+        existingStates[speakerUid] = existing.copyWith(playback: pb);
       }
 
-      // If the active speaker differs from the data speaker (e.g., active is a
-      // group member, data is from the coordinator), also mirror the playback
-      // under the active speaker's key so activePlayback always returns data.
-      if (activeUid != dataSpeakerUid) {
-        existingStates[activeUid] = (existingStates[activeUid] ?? const SpeakerState())
-            .copyWith(playback: newPlayback, playlists: newPlaylists);
+      // Also store playlists under the data's speaker.
+      if (dataSpeakerUid != null) {
+        final existing = existingStates[dataSpeakerUid] ?? const SpeakerState();
+        existingStates[dataSpeakerUid] = existing.copyWith(playlists: newPlaylists);
+      }
+
+      // Build a group lookup to check if active and data speakers share a group.
+      final groupOf = <String, String>{};
+      for (final g in newGroups) {
+        for (final m in g.memberUids) {
+          groupOf[m] = g.coordinatorUid;
+        }
+      }
+
+      // Only mirror playback from dataSpeakerUid to activeUid if they are in
+      // the same Sonos group (group members share the coordinator's playback).
+      // This prevents stale data from an unrelated speaker overwriting the
+      // active speaker's correct metadata when an in-flight poll completes
+      // after the user has already switched speakers.
+      if (activeUid != dataSpeakerUid &&
+          dataSpeakerUid != null &&
+          groupOf[activeUid] != null &&
+          groupOf[activeUid] == groupOf[dataSpeakerUid]) {
+        final existing = existingStates[activeUid] ?? const SpeakerState();
+        existingStates[activeUid] =
+            existing.copyWith(playback: newPlayback, playlists: newPlaylists);
       }
 
       // Clear optimistic play-state override if real data matches or is stale.
-      final activeSpeakerUid = activeUid;
       if (_optimisticPlayState != null && _optimisticAppliedAt != null) {
         final isStale = DateTime.now().difference(_optimisticAppliedAt!) > _optimisticTimeout;
-        final realState = (existingStates[activeSpeakerUid] ?? const SpeakerState()).playback.state;
+        final realState = (existingStates[activeUid] ?? const SpeakerState()).playback.state;
         if (isStale || realState == _optimisticPlayState) {
           _optimisticPlayState = null;
           _optimisticAppliedAt = null;
         }
+      }
+
+      // Re-apply optimistic play-state if still active. The per-speaker
+      // playback loop above may have overwritten the active speaker's state
+      // with stale poll data. We force the play state back to the optimistic
+      // value while keeping the poll's fresh metadata (title/artist/artwork).
+      if (_optimisticPlayState != null) {
+        final existing = existingStates[activeUid] ?? const SpeakerState();
+        existingStates[activeUid] = existing.copyWith(
+          playback: existing.playback.copyWith(state: _optimisticPlayState),
+        );
       }
 
       _sonos = _sonos.copyWith(
@@ -183,9 +223,13 @@ class AppState extends ChangeNotifier {
       error: null,
     );
 
-    // Preload artwork
-    if (newPlayback.artworkUrl.isNotEmpty && !artworkCache.isReady(newPlayback.artworkUrl)) {
-      artworkCache.get(newPlayback.artworkUrl);
+    // Preload artwork for all speakers' current tracks so artwork appears
+    // instantly when switching the active speaker.
+    for (final entry in playbacks.entries) {
+      final artUrl = entry.value.artworkUrl;
+      if (artUrl.isNotEmpty && !artworkCache.isReady(artUrl)) {
+        artworkCache.get(artUrl);
+      }
     }
 
     notifyListeners();
@@ -244,6 +288,20 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void showVolumeControl() {
+    if (!_volumeControlVisible) {
+      _volumeControlVisible = true;
+      notifyListeners();
+    }
+  }
+
+  void hideVolumeControl() {
+    if (_volumeControlVisible) {
+      _volumeControlVisible = false;
+      notifyListeners();
+    }
+  }
+
   // --- Actions ---
 
   Future<void> togglePlayPause() async {
@@ -290,6 +348,12 @@ class AppState extends ChangeNotifier {
   Future<void> nextTrack() async {
     final name = _sonos.activeSpeaker?.name;
     if (name == null) return;
+    // Preserve the 'playing' state during track transition so the turntable
+    // doesn't briefly stop when the Sonos reports a transient state between
+    // tracks.
+    if (_sonos.activePlayback.isPlaying) {
+      _applyOptimisticPlayState('playing');
+    }
     try {
       await api.nextCommand(_config, name);
     } catch (e) {
@@ -300,6 +364,10 @@ class AppState extends ChangeNotifier {
   Future<void> previousTrack() async {
     final name = _sonos.activeSpeaker?.name;
     if (name == null) return;
+    // Same as nextTrack — preserve 'playing' during the transition.
+    if (_sonos.activePlayback.isPlaying) {
+      _applyOptimisticPlayState('playing');
+    }
     try {
       await api.previousCommand(_config, name);
     } catch (e) {
@@ -318,15 +386,21 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setActiveSpeaker(String uid) async {
+    if (_sonos.activeSpeakerUid == uid) return;
+
+    // Switch immediately — the new active speaker's metadata is already cached
+    // from the last poll's per-speaker playback data (see _handleUpdate).
+    // This gives an instant UI update with no network round-trip.
     _sonos = _sonos.copyWith(activeSpeakerUid: uid);
-    // Return cached data immediately for instant display
-    final cached = api.getCachedOrRefresh(
+    notifyListeners();
+
+    // Trigger a background refresh to fetch the latest state for the newly
+    // active speaker. The result arrives via _handleUpdate.
+    api.getCachedOrRefresh(
       _config,
       uid,
       onRefreshed: (data) => _handleUpdate(data),
     );
-    if (cached != null) _handleUpdate(cached);
-    notifyListeners();
   }
 
   Future<void> groupSpeakers(String coord, String member) async {

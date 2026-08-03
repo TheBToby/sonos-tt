@@ -260,6 +260,14 @@ class SonosApi {
         if (activeSpeakerName == null && (_mock.speakers as List).isNotEmpty) {
           activeSpeakerName = _mock.speakers[0]['name'] as String;
         }
+        // Mirror the shared mock playback to every speaker so that switching
+        // the active speaker is instant (matches the real-API behaviour below).
+        final mockPlaybacks = <String, Map<String, dynamic>>{};
+        for (final s in (_mock.speakers as List)) {
+          final sn = (s as Map<String, dynamic>)['name'] as String;
+          mockPlaybacks[sn] = Map<String, dynamic>.from(data['playback'] as Map<String, dynamic>);
+        }
+        data['playbacks'] = mockPlaybacks;
       } else {
         // 1. Get speaker list
         final speakersRes = await apiGet(cfg.socoApi.baseUrl, '/speakers', cfg.socoApi.timeout);
@@ -365,6 +373,18 @@ class SonosApi {
           } catch (_) {}
         }
 
+        // Build per-speaker playbacks from probed data so switching the active
+        // speaker is instant (the last poll already has every speaker's track).
+        final allPlaybacks = <String, Map<String, dynamic>>{};
+        for (final p in probed) {
+          final pname = p['name'] as String;
+          final pti = p['trackInfo'] as Map<String, dynamic>;
+          allPlaybacks[pname] = {
+            'state': p['state'],
+            ...pti,
+          };
+        }
+
         data = {
           'speakers': speakerInfos,
           'groups': _groupsCache ?? [],
@@ -372,6 +392,7 @@ class SonosApi {
             'state': parseStateResult(stateText),
             ...trackInfo,
           },
+          'playbacks': allPlaybacks,
           'queue': <dynamic>[],
           'playlists':
               _playlistsCache?.map((p) => {'title': p.title, 'item_id': p.itemId}).toList() ?? [],
@@ -380,6 +401,17 @@ class SonosApi {
 
       final speakerPlayback = _buildPlayback(data['playback'] as Map<String, dynamic>);
       final speakerUid = activeSpeakerName ?? (data['speakers'] as List).firstOrNull?['name'];
+
+      // Convert raw per-speaker playbacks to Playback objects.
+      final playbacks = <String, Playback>{};
+      final rawPlaybacks = data['playbacks'] as Map<String, dynamic>?;
+      if (rawPlaybacks != null) {
+        for (final entry in rawPlaybacks.entries) {
+          playbacks[entry.key] = _buildPlayback(entry.value as Map<String, dynamic>);
+        }
+      }
+      // Always ensure the active speaker's playback is present.
+      playbacks[speakerUid] = speakerPlayback;
 
       final groupLookup = <String, Map<String, dynamic>>{};
       for (final g in (data['groups'] as List)) {
@@ -395,6 +427,7 @@ class SonosApi {
       return {
         'speakerUid': speakerUid,
         'playback': speakerPlayback,
+        'playbacks': playbacks,
         'speakers': (data['speakers'] as List).map((sp) {
           final m = sp as Map<String, dynamic>;
           final group =
@@ -437,9 +470,15 @@ class SonosApi {
       if (_fallbackToMock) {
         _mock.tick();
         final activeName = activeSpeakerName ?? (_mock.speakers as List).firstOrNull?['name'];
+        final mockPlaybacks = <String, Playback>{};
+        for (final s in (_mock.speakers as List)) {
+          final sn = (s as Map<String, dynamic>)['name'] as String;
+          mockPlaybacks[sn] = _buildPlayback(_mock.playback);
+        }
         return {
           'speakerUid': activeName,
           'playback': _buildPlayback(_mock.playback),
+          'playbacks': mockPlaybacks,
           'speakers': (_mock.speakers as List).map((s) {
             final m = s as Map<String, dynamic>;
             return Speaker(

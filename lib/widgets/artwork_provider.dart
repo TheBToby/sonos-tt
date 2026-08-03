@@ -5,22 +5,19 @@ import 'package:flutter/painting.dart';
 
 import '../services/artwork_cache.dart';
 
-/// Image provider that caches the [ImageStreamCompleter] by URL so that
-/// repeated provider instances for the same URL return the **same**
-/// completer. This prevents Flutter's [Image] widget from creating a new
-/// stream on every 16 ms animation-frame rebuild, which would otherwise
-/// cause flickering and "disposed image" errors.
+/// Image provider that loads artwork from a URL via [ArtworkCache] (which
+/// caches the raw bytes) and lets Flutter's [ImageCache] handle caching of
+/// the decoded image.
 ///
-/// [OneFrameImageStreamCompleter] cannot be used here because it disposes
-/// the image after a single delivery, making it incompatible with caching
-/// the decoded image across rebuilds.
+/// **Critical**: [operator ==] and [hashCode] are defined based on [url]
+/// so that [ImageCache] reuses the same completer across rebuilds. The
+/// turntable animation timer calls `setState` every 16 ms; without these
+/// overrides, a new provider/key would be created each frame, causing the
+/// old completer to be disposed while [ImageCache] still holds a reference
+/// — producing the "Bad state: Stream has been disposed" error.
 class ArtworkImageProvider extends ImageProvider<ArtworkImageProvider> {
   final String url;
   final ArtworkCache cache;
-
-  /// Cache of stream completers keyed by URL.
-  /// [MultiFrameImageStreamCompleter] handles multiple listeners safely.
-  static final Map<String, ImageStreamCompleter> _completerCache = {};
 
   ArtworkImageProvider(this.url, this.cache);
 
@@ -29,43 +26,31 @@ class ArtworkImageProvider extends ImageProvider<ArtworkImageProvider> {
       SynchronousFuture<ArtworkImageProvider>(this);
 
   @override
-  ImageStreamCompleter loadImage(ArtworkImageProvider key, ImageDecoderCallback decode) {
-    final existing = _completerCache[url];
-    if (existing != null) return existing;
+  bool operator ==(Object other) => other is ArtworkImageProvider && other.url == url;
 
-    final completer = MultiFrameImageStreamCompleter(
-      codec: _loadAsync(decode),
+  @override
+  int get hashCode => url.hashCode;
+
+  @override
+  ImageStreamCompleter loadImage(
+    ArtworkImageProvider key,
+    ImageDecoderCallback decode,
+  ) {
+    return MultiFrameImageStreamCompleter(
+      codec: _loadAsync(key, decode),
       scale: 1.0,
-      informationCollector: () sync* {
-        yield ErrorDescription('ArtworkImageProvider: $url');
-      },
     );
-    _completerCache[url] = completer;
-    return completer;
   }
 
-  Future<ui.Codec> _loadAsync(ImageDecoderCallback decode) async {
-    try {
-      final bytes = await cache.get(url);
-      if (bytes == null || bytes.isEmpty) {
-        _completerCache.remove(url);
-        throw Exception('No artwork data for $url');
-      }
-      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
-      return decode(buffer);
-    } catch (e) {
-      _completerCache.remove(url);
-      rethrow;
+  Future<ui.Codec> _loadAsync(
+    ArtworkImageProvider key,
+    ImageDecoderCallback decode,
+  ) async {
+    final bytes = await key.cache.get(key.url);
+    if (bytes == null || bytes.isEmpty) {
+      throw Exception('No artwork data for ${key.url}');
     }
-  }
-
-  /// Remove a single URL from the completer cache.
-  static void evictUrl(String url) {
-    _completerCache.remove(url);
-  }
-
-  /// Clear the entire completer cache (e.g. on config change).
-  static void clearCache() {
-    _completerCache.clear();
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    return decode(buffer);
   }
 }
