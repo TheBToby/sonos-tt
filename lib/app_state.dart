@@ -37,6 +37,11 @@ class AppState extends ChangeNotifier {
   String? _volumeMode;
   String? get volumeMode => _volumeMode;
 
+  // --- Optimistic play state (for instant UI response on play/pause) ---
+  String? _optimisticPlayState;
+  DateTime? _optimisticAppliedAt;
+  static const _optimisticTimeout = Duration(seconds: 3);
+
   bool _navVisible = false;
   bool get navVisible => _navVisible;
 
@@ -147,6 +152,17 @@ class AppState extends ChangeNotifier {
             .copyWith(playback: newPlayback, playlists: newPlaylists);
       }
 
+      // Clear optimistic play-state override if real data matches or is stale.
+      final activeSpeakerUid = activeUid;
+      if (_optimisticPlayState != null && _optimisticAppliedAt != null) {
+        final isStale = DateTime.now().difference(_optimisticAppliedAt!) > _optimisticTimeout;
+        final realState = (existingStates[activeSpeakerUid] ?? const SpeakerState()).playback.state;
+        if (isStale || realState == _optimisticPlayState) {
+          _optimisticPlayState = null;
+          _optimisticAppliedAt = null;
+        }
+      }
+
       _sonos = _sonos.copyWith(
         speakers: newSpeakers,
         activeSpeakerUid: activeUid,
@@ -233,15 +249,42 @@ class AppState extends ChangeNotifier {
   Future<void> togglePlayPause() async {
     final name = _sonos.activeSpeaker?.name;
     if (name == null) return;
+
+    // Optimistic update: flip play state immediately for instant UI response.
+    // The post-command refresh burst will confirm or correct this within ~300ms.
+    final currentState = _sonos.activePlayback.state;
+    final newState = currentState == 'playing' ? 'paused' : 'playing';
+    _applyOptimisticPlayState(newState);
+
     try {
-      if (_sonos.activePlayback.isPlaying) {
+      if (currentState == 'playing') {
         await api.pauseCommand(_config, name);
       } else {
         await api.playCommand(_config, name);
       }
     } catch (e) {
+      // Revert optimistic state on error
+      _applyOptimisticPlayState(currentState);
       showToast('connection.error');
     }
+  }
+
+  /// Apply an optimistic play state to the active speaker for instant UI feedback.
+  /// Sets a 3-second override window; incoming refreshes that match will clear it.
+  void _applyOptimisticPlayState(String newState) {
+    final activeUid = _sonos.activeSpeakerUid;
+    if (activeUid == null) return;
+
+    _optimisticPlayState = newState;
+    _optimisticAppliedAt = DateTime.now();
+
+    final states = Map<String, SpeakerState>.from(_sonos.speakerStates);
+    final current = states[activeUid] ?? const SpeakerState();
+    states[activeUid] = current.copyWith(
+      playback: current.playback.copyWith(state: newState),
+    );
+    _sonos = _sonos.copyWith(speakerStates: states);
+    notifyListeners();
   }
 
   Future<void> nextTrack() async {

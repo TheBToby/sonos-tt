@@ -74,16 +74,12 @@ class _TurntableLayerState extends State<TurntableLayer> {
       context.read<AppState>().showNav();
       return;
     }
-    // Single tap: delay to wait for possible double-tap
+    // Single tap: delay to wait for possible double-tap.
+    // Play/pause is NOT triggered here — it's only via the center button.
     _lastTap = now;
     _doubleTapTimer?.cancel();
     _doubleTapTimer = Timer(const Duration(milliseconds: 360), () {
-      if (mounted) {
-        final state = context.read<AppState>();
-        if (!state.navVisible) {
-          state.togglePlayPause();
-        }
-      }
+      // No action on single tap (reserved for double-tap detection only)
     });
   }
 
@@ -174,20 +170,39 @@ class _TurntableLayerState extends State<TurntableLayer> {
                 ),
               ),
             ),
-            // Center spindle hole
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.black,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.white.withValues(alpha: 0.15),
-                    blurRadius: 3,
-                    spreadRadius: -1,
+            // Center play/pause button (the "spindle" — also toggles playback)
+            Center(
+              child: GestureDetector(
+                onTap: () {
+                  final state = context.read<AppState>();
+                  if (!state.navVisible) {
+                    state.togglePlayPause();
+                  }
+                },
+                child: Container(
+                  width: size * 0.18,
+                  height: size * 0.18,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.black.withValues(alpha: 0.85),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        blurRadius: 8,
+                        spreadRadius: -2,
+                      ),
+                    ],
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                      width: 1,
+                    ),
                   ),
-                ],
+                  child: Icon(
+                    pb.isPlaying ? Icons.pause : Icons.play_arrow,
+                    size: size * 0.08,
+                    color: Colors.white.withValues(alpha: 0.9),
+                  ),
+                ),
               ),
             ),
             // Speaker name at top
