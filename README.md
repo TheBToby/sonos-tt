@@ -142,11 +142,33 @@ sudo make install
 
 ### 2. Build & deploy
 
+The build script detects your OS and handles cross-compilation automatically:
+
+- **macOS**: Syncs source to the Pi and builds **remotely** via SSH
+- **Linux**: Builds locally (requires aarch64 cross-compile toolchain)
+
 ```bash
-# From your dev machine (cross-compile) or directly on the Pi
-cd flutter
-./deploy/build.sh                    # builds to build/linux-arm64/bundle/
-./deploy/deploy.sh raspberrypi       # rsync to Pi
+# From your dev machine (macOS or Linux)
+./deploy/build.sh                    # build (remote on macOS, local on Linux)
+./deploy/build.sh --deploy           # build + deploy in one step
+./deploy/deploy.sh                   # deploy an existing build to the Pi
+
+# Specify a custom Pi hostname
+PI_HOST=my-pi ./deploy/build.sh --deploy
+```
+
+**Requirements for macOS remote build:**
+- SSH key access to the Pi: `ssh-copy-id pi@raspberrypi`
+- Flutter SDK installed on the Pi (the build runs there):
+
+```bash
+# Install Flutter on the Pi (one-time setup)
+ssh pi@raspberrypi
+sudo apt install -y git curl
+git clone https://github.com/flutter/flutter.git ~/flutter
+echo 'export PATH=$PATH:$HOME/flutter/bin' >> ~/.bashrc
+source ~/.bashrc
+flutter doctor
 ```
 
 ### 3. Run as systemd service
