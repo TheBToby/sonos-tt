@@ -130,15 +130,75 @@ flutter build linux --release
 
 ### 1. Install flutter-pi on the Pi
 
+flutter-pi is a standalone engine that runs Flutter apps directly on top of
+the Linux DRM/KMS framebuffer (no X11/Wayland/desktop). It must be built from
+source on the Pi.
+
 ```bash
-# On the Pi
-git clone https://github.com/ardera/flutter-pi.git
+# ─── On the Pi ────────────────────────────────────────────────────────────
+# 1a. Install build tools, graphics/system libraries, and fonts.
+#     These are the EXACT dependencies from the flutter-pi docs.
+#     Do NOT skip ttf-mscorefonts-installer — the Flutter engine requires Arial.
+sudo apt update
+sudo apt install -y \
+  build-essential cmake pkg-config git \
+  libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+  libdrm-dev libgbm-dev \
+  libsystemd-dev libinput-dev libudev-dev libxkbcommon-dev \
+  ttf-mscorefonts-installer fontconfig
+
+# Update the font cache so the newly installed fonts are found.
+sudo fc-cache
+
+# 1b. Clone flutter-pi (with submodules).
+#     --recursive is required — it pulls in the Flutter engine binaries.
+git clone --recursive https://github.com/ardera/flutter-pi.git
 cd flutter-pi
+
+# 1c. Configure and build.
+#     ⚠️  Do NOT use sudo here! Run cmake and make as your normal user.
+#     Using sudo for cmake can break the build (wrong sysroot, permission issues).
 mkdir build && cd build
 cmake ..
-make -j$(nproc)
+make -j"$(nproc)"
+
+# 1d. Install system-wide. This places the binary at /usr/local/bin/flutter-pi.
+#     ONLY this step uses sudo.
 sudo make install
+sudo ldconfig    # refresh the shared-library cache
+
+# 1e. VERIFY the install — this must print a path, not "command not found".
+which flutter-pi
+flutter-pi --help    # should print usage info
+
+# 1f. Give your user permission to use 3D acceleration.
+#     flutter-pi needs direct GPU access via DRM/KMS.
+sudo usermod -a -G render "$USER"
+#     (Log out and back in, or reboot, for this to take effect.)
 ```
+
+> **Common `cmake ..` errors and fixes:**
+>
+> - **`Package 'gbm', required by 'virtual:world', not found`**
+>   → `pkg-config` is missing. Install it: `sudo apt install -y pkg-config`
+>   Then delete the build dir and retry: `rm -rf build && mkdir build && cd build && cmake ..`
+>
+> - **`Package 'libsystemd' not found`** (or similar for other packages)
+>   → A `-dev` package is missing. Re-run the full `apt install` command from step 1a.
+>
+> - **`Could NOT find OpenGL/EGL`**
+>   → Mesa development libraries missing: `sudo apt install -y libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev`
+>
+> **If `flutter-pi` is still "command not found" after `sudo make install`:**
+>
+> - Check where it actually landed: `ls -la /usr/local/bin/flutter-pi`
+> - If it's there but not in `PATH`, either call it by full path
+>   (`/usr/local/bin/flutter-pi ...`) or add `/usr/local/bin` to your `PATH`.
+> - If the `make install` step was skipped (e.g. the build failed earlier),
+>   re-run it: `cd flutter-pi/build && sudo make install`.
+> - The systemd service file uses the absolute path
+>   `/usr/local/bin/flutter-pi` (see `deploy/sonos-tt-flutter.service`), so the
+>   service does not depend on `PATH` — only interactive shell use does.
 
 ### 2. Build & deploy
 
@@ -157,19 +217,50 @@ The build script detects your OS and handles cross-compilation automatically:
 PI_HOST=my-pi ./deploy/build.sh --deploy
 ```
 
+**Where things live on the Pi:**
+
+| Path | What | Notes |
+|------|------|-------|
+| `~/sonos-tt-src` | Remote source checkout + build output | Inside the user's home — no sudo needed. Override with `REMOTE_DIR=...`. |
+| `/opt/sonos-tt` | Final deployed bundle (read by flutter-pi) | `/opt` is root-owned. The scripts create it **once** via `sudo mkdir` + `chown` to your user, then subsequent deploys run without sudo. Override with `DEPLOY_DIR=...`. |
+
+The first `--deploy` will prompt for the sudo password (to create `/opt/sonos-tt`).
+If you prefer to set it up manually once:
+
+```bash
+ssh pi@raspberrypi 'sudo mkdir -p /opt/sonos-tt && sudo chown $USER:$USER /opt/sonos-tt'
+```
+
 **Requirements for macOS remote build:**
 - SSH key access to the Pi: `ssh-copy-id pi@raspberrypi`
-- Flutter SDK installed on the Pi (the build runs there):
+  (If your Pi username isn't the same as your Mac username, include it in
+  `PI_HOST`, e.g. `PI_HOST=pi@192.168.0.25`)
+- Flutter SDK installed on the Pi **and visible to non-interactive SSH** (the
+  build runs via `ssh pi@host "flutter ..."`):
 
 ```bash
 # Install Flutter on the Pi (one-time setup)
 ssh pi@raspberrypi
-sudo apt install -y git curl
+# Flutter's `flutter build linux` requires the Linux desktop toolchain
+# (clang/g++ compiler, ninja build system, GTK headers):
+sudo apt install -y git curl clang g++ cmake pkg-config ninja-build libgtk-3-dev
 git clone https://github.com/flutter/flutter.git ~/flutter
-echo 'export PATH=$PATH:$HOME/flutter/bin' >> ~/.bashrc
-source ~/.bashrc
+
+# IMPORTANT: Add Flutter to the SYSTEM PATH, not just ~/.bashrc.
+# Non-interactive SSH (used by deploy/build.sh) does not source ~/.bashrc on
+# Raspberry Pi OS, so a PATH export appended there is not applied. A symlink
+# in /usr/local/bin is the most reliable fix:
+sudo ln -s "$HOME/flutter/bin/flutter" /usr/local/bin/flutter
+
+# Verify it is found both interactively AND non-interactively:
 flutter doctor
+ssh pi@raspberrypi 'command -v flutter'   # must print a path
 ```
+
+> **Note:** If you previously followed instructions that appended
+> `export PATH=...:$HOME/flutter/bin` to `~/.bashrc` and still see
+> `ERROR: Flutter not found on <pi>` from `build.sh`, the cause is the
+> non-interactive SSH PATH. Run the `sudo ln -s ...` command above.
 
 ### 3. Run as systemd service
 
@@ -183,8 +274,14 @@ sudo systemctl enable --now sonos-tt-flutter
 ### Manual test run
 
 ```bash
-# On the Pi, with SoCo-CLI running
-flutter-pi /opt/sonos-tt/libapp.so --release
+# On the Pi, with SoCo-CLI running.
+# Use the absolute path to match the systemd service and avoid PATH issues.
+# NOTE: Pass the bundle DIRECTORY, not libapp.so — flutter-pi expects a dir.
+# NOTE: --release must come BEFORE the bundle path (flutter-pi argument order).
+/usr/local/bin/flutter-pi --release /opt/sonos-tt
+
+# (equivalent, once flutter-pi is in your PATH:)
+# flutter-pi --release /opt/sonos-tt
 ```
 
 ## Mock Mode

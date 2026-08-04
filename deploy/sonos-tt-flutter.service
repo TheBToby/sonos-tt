@@ -10,7 +10,7 @@ Type=simple
 User=pi
 Environment=DISPLAY=:0
 Environment=XDG_RUNTIME_DIR=/run/user/1000
-ExecStart=/usr/local/bin/flutter-pi /opt/sonos-tt/libapp.so --release
+ExecStart=/usr/local/bin/flutter-pi --release /opt/sonos-tt
 Restart=on-failure
 RestartSec=3
 
