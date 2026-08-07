@@ -1,0 +1,10 @@
+# Triggers soco-discover.service every 30 minutes to refresh speaker cache.
+[Unit]
+Description=Timer for periodic SoCo-CLI speaker discovery
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target

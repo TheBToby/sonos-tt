@@ -3,9 +3,11 @@ set -euo pipefail
 
 # Deploy sonos-tt Flutter bundle to a Raspberry Pi.
 #
-# This script detects the host OS:
-#   - Linux:  deploys local build/linux-arm64/bundle/ to the Pi via rsync
-#   - macOS/other: deploys the remote bundle from the Pi's build dir to /opt/sonos-tt
+# Copies the flutterpi_tool output bundle to /opt/sonos-tt on the Pi.
+# The flutterpi_tool bundle already has the correct flat layout for flutter-pi:
+#   app.so, libflutter_engine.so, icudtl.dat, fonts/, shaders/, etc.
+#
+# No manual flattening or renaming is needed — just rsync the entire directory.
 #
 # Usage:
 #   ./deploy/deploy.sh [pi-host]
@@ -14,13 +16,33 @@ set -euo pipefail
 PI_HOST="${PI_HOST:-${1:-raspberrypi}}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-HOST_OS="$(uname -s)"
 
 # Deploy target on the Pi. /opt requires root, so the script bootstraps it once
 # (sudo mkdir + chown to the remote user) and then writes to it without sudo.
 DEPLOY_DIR="${DEPLOY_DIR:-/opt/sonos-tt}"
 
+# The flutterpi_tool output directory.
+BUNDLE_BASE="$PROJECT_DIR/build/flutter-pi"
+
 echo "=== Deploying sonos-tt to $PI_HOST ==="
+
+# ─── Locate the local bundle ─────────────────────────────────────────────────
+BUNDLE_DIR=""
+for dir in "$BUNDLE_BASE"/*; do
+  if [ -f "$dir/app.so" ] && [ -f "$dir/libflutter_engine.so" ]; then
+    BUNDLE_DIR="$dir"
+    break
+  fi
+done
+
+if [ -z "$BUNDLE_DIR" ] || [ ! -d "$BUNDLE_DIR" ]; then
+  echo "ERROR: flutter-pi bundle not found in $BUNDLE_BASE"
+  echo "Expected: app.so and libflutter_engine.so in $BUNDLE_BASE/*/"
+  echo "Run ./deploy/build.sh first"
+  exit 1
+fi
+echo "Bundle: $BUNDLE_DIR"
+echo ""
 
 # ─── SSH connection multiplexing ─────────────────────────────────────────────
 # Reuse a single SSH connection for ALL ssh/rsync calls in this script. This
@@ -40,89 +62,101 @@ trap cleanup EXIT
 # Only the FIRST deploy triggers the sudo prompt; after that, the dir is owned
 # by the remote user and no sudo is needed.
 ensure_deploy_dir() {
-  # Fast path: if the dir already exists and is writable, skip sudo entirely.
-  if ssh "${SSH_CTL[@]}" "$PI_HOST" "test -w '$DEPLOY_DIR'" 2>/dev/null; then
+  # Ensure $DEPLOY_DIR exists and is FULLY owned by the remote user.
+  # A simple `test -w` check is insufficient: a prior deploy done as root
+  # (or a manual `sudo cp`) can leave the top-level dir user-owned while
+  # subdirectories remain root-owned. `test -w` then passes, but `rm -rf`
+  # later fails with "Permission denied" on the root-owned subtrees.
+  # We scan for any file/dir NOT owned by $USER inside $DEPLOY_DIR; if any
+  # are found (or the dir doesn't exist), fix ownership with sudo chown -R.
+  if ssh "${SSH_CTL[@]}" "$PI_HOST" "
+    test -d '$DEPLOY_DIR' && \
+    ! find '$DEPLOY_DIR' ! -user \"\$USER\" -print -quit 2>/dev/null | grep -q .
+  " 2>/dev/null; then
     return 0
   fi
-  # Dir doesn't exist or isn't writable — need sudo to create it.
+  # Dir doesn't exist, or contains files not owned by $USER — fix with sudo.
   # Use -t to allocate a TTY so sudo can interactively prompt for a password.
-  echo "→ First deploy: creating $DEPLOY_DIR (requires sudo on Pi)..."
+  echo "→ Ensuring $DEPLOY_DIR ownership (requires sudo on Pi)..."
   ssh -t "${SSH_CTL[@]}" "$PI_HOST" "
-    sudo mkdir -p '$DEPLOY_DIR' && sudo chown \"\$USER:\$USER\" '$DEPLOY_DIR'
+    sudo mkdir -p '$DEPLOY_DIR' && sudo chown -R \"\$USER:\$USER\" '$DEPLOY_DIR'
   "
 }
 
-# ─── Local deploy (Linux host — bundle is local) ─────────────────────────────
-if [ "$HOST_OS" = "Linux" ]; then
-  BUNDLE_DIR="$PROJECT_DIR/build/linux-arm64/bundle"
-  if [ ! -d "$BUNDLE_DIR" ]; then
-    echo "ERROR: Bundle not found at $BUNDLE_DIR"
-    echo "Run ./deploy/build.sh first"
-    exit 1
+# ─── Helper: ensure the remote user is in video/render/input groups ──────────
+# flutter-pi opens DRM/GPU/input devices directly. On Raspberry Pi OS these are
+# group-owned by:
+#   video  (/dev/dri/card*)
+#   render (/dev/dri/renderD*)
+#   input  (/dev/input/event*)
+# Without membership in these groups, flutter-pi fails with:
+#   "Couldn't open DRM device. open: Permission denied"
+# Manual `flutter-pi ...` runs use the user's own groups, so the user MUST be
+# in them. (The systemd service uses SupplementaryGroups as a belt-and-braces
+# fallback.) Only prompts for sudo if a group is actually missing.
+ensure_groups() {
+  local missing
+  missing="$(ssh "${SSH_CTL[@]}" "$PI_HOST" '
+    for g in video render input; do
+      groups "$USER" | grep -qw "$g" || echo "$g"
+    done
+  ' 2>/dev/null | tr -d '\r')"
+  if [ -z "$missing" ]; then
+    return 0
   fi
-  echo "Bundle: $BUNDLE_DIR"
-  echo ""
-  ensure_deploy_dir
-  # ─── Flatten the bundle for flutter-pi ─────────────────────────────────
-  # (See comment in the remote deploy section below for full explanation.)
-  # Rename libapp.so → app.so during deploy (flutter-pi expects app.so)
-  rsync -avz --delete \
-    -e "$SSH_RSYNC_E" \
-    --copy-links \
-    "$BUNDLE_DIR/lib/libapp.so" \
-    "$BUNDLE_DIR/data/icudtl.dat" \
-    "$PI_HOST:$DEPLOY_DIR/"
-  ssh "${SSH_CTL[@]}" "$PI_HOST" "mv '$DEPLOY_DIR/libapp.so' '$DEPLOY_DIR/app.so'"
-  rsync -avz --delete \
-    -e "$SSH_RSYNC_E" \
-    "$BUNDLE_DIR/data/flutter_assets/" \
-    "$PI_HOST:$DEPLOY_DIR/flutter_assets/"
+  echo "→ Adding remote user to group(s): $(echo "$missing" | tr '\n' ' ')"
+  echo "  (requires sudo on Pi; log out/in or reboot afterward for it to take effect)"
+  # NOTE: paste -sd, - joins lines with commas WITHOUT a trailing comma (unlike
+  # tr '\n' ',' which leaves a trailing comma → usermod: group '' does not exist).
+  # The "-" tells paste to read stdin (required by BSD paste on macOS; GNU paste
+  # reads stdin by default, so "-" is the portable form across both).
+  # The $(...) runs LOCALLY (macOS) before the SSH command string is assembled,
+  # so we must use a form that works on the local host OS, not the Pi.
+  ssh -t "${SSH_CTL[@]}" "$PI_HOST" "sudo usermod -aG \"$(echo "$missing" | paste -sd, -)\" \"\$USER\""
+}
 
-# ─── Remote deploy (macOS host — bundle is on the Pi from remote build) ──────
-else
-  # Resolve remote HOME so we can find the remote build output.
-  REMOTE_HOME="$(ssh "${SSH_CTL[@]}" "$PI_HOST" 'printf %s "$HOME"' 2>/dev/null | tr -d '\r\n')"
-  if [ -z "$REMOTE_HOME" ]; then
-    echo "ERROR: Could not resolve remote \$HOME on $PI_HOST"
-    exit 1
+# ─── Deploy ──────────────────────────────────────────────────────────────────
+ensure_deploy_dir
+
+# ─── Copy the bundle to the Pi ───────────────────────────────────────────────
+# flutterpi_tool produces a flat bundle directory containing:
+#   app.so                   — compiled Dart AOT snapshot
+#   libflutter_engine.so     — Flutter Engine library (downloaded by flutterpi_tool)
+#   icudtl.dat               — ICU internationalization data
+#   flutter_assets/          — Flutter asset bundle
+#   (and other supporting files)
+#
+# We rsync the entire directory to /opt/sonos-tt. --delete removes old files
+# from previous deploys.
+echo "→ Copying bundle to $PI_HOST:$DEPLOY_DIR ..."
+rsync -avz --delete \
+  -e "$SSH_RSYNC_E" \
+  --exclude='flutter-pi' \
+  --exclude='linux/' \
+  --exclude='native_assets/' \
+  "$BUNDLE_DIR/" "$PI_HOST:$DEPLOY_DIR/"
+
+# Also copy the systemd service files
+for svc in sonos-tt-flutter.service soco-cli.service soco-discover.service soco-discover.timer; do
+  if [ -f "$SCRIPT_DIR/$svc" ]; then
+    rsync -avz \
+      -e "$SSH_RSYNC_E" \
+      "$SCRIPT_DIR/$svc" "$PI_HOST:$DEPLOY_DIR/"
   fi
-  REMOTE_DIR="${REMOTE_DIR:-$REMOTE_HOME/sonos-tt-src}"
-  REMOTE_BUNDLE="$REMOTE_DIR/build/linux/arm64/release/bundle"
-  echo "Bundle: $PI_HOST:$REMOTE_BUNDLE"
-  echo ""
-  # Check that a remote build exists
-  if ! ssh "${SSH_CTL[@]}" "$PI_HOST" "test -d '$REMOTE_BUNDLE'"; then
-    echo "ERROR: Remote bundle not found at $PI_HOST:$REMOTE_BUNDLE"
-    echo "Run ./deploy/build.sh first (builds remotely on the Pi)"
-    exit 1
-  fi
-  ensure_deploy_dir
-  # ─── Flatten the bundle for flutter-pi ─────────────────────────────────
-  # `flutter build linux` produces a GTK desktop layout:
-  #   bundle/lib/libapp.so       (compiled Dart app)
-  #   bundle/data/icudtl.dat     (ICU data)
-  #   bundle/data/flutter_assets/(Flutter assets)
-  #
-  # But flutter-pi expects a FLAT layout with app.so (not libapp.so):
-  #   app.so                      (renamed from lib/libapp.so)
-  #   icudtl.dat
-  #   flutter_assets/
-  #
-  # We flatten + rename during deploy.
-  ssh "${SSH_CTL[@]}" "$PI_HOST" "
-    rm -rf '$DEPLOY_DIR'/* &&
-    cp '$REMOTE_BUNDLE/lib/libapp.so' '$DEPLOY_DIR/app.so' &&
-    cp '$REMOTE_BUNDLE/data/icudtl.dat' '$DEPLOY_DIR/icudtl.dat' &&
-    cp -r '$REMOTE_BUNDLE/data/flutter_assets' '$DEPLOY_DIR/flutter_assets'
-  "
-fi
+done
+
+# Ensure the remote user can access DRM/GPU/input devices for manual runs.
+ensure_groups
 
 echo ""
 echo "=== Deploy complete ==="
+echo ""
+echo "Bundle contents on Pi:"
+ssh "${SSH_CTL[@]}" "$PI_HOST" "ls -la '$DEPLOY_DIR/' | head -15"
 echo ""
 echo "On the Pi, you can now:"
 echo "  1. Restart the systemd service:"
 echo "     ssh $PI_HOST 'sudo systemctl restart sonos-tt-flutter'"
 echo ""
-echo "  2. Or run manually:"
+echo "  2. Or run manually (requires the video/render/input groups above):"
 echo "     ssh $PI_HOST 'flutter-pi --release $DEPLOY_DIR'"

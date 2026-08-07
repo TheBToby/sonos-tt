@@ -1,0 +1,13 @@
+# Periodically refresh the Sonos speaker discovery cache.
+# This catches new/removed speakers without restarting the API server.
+# Runs every 30 min after soco-cli.service starts.
+[Unit]
+Description=Refresh SoCo-CLI speaker discovery cache
+After=soco-cli.service
+
+[Service]
+Type=oneshot
+User=pi
+Environment=PATH=/home/pi/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=SOCO_SUBNETS=192.168.0.0/24
+ExecStart=/home/pi/.local/bin/soco-discover --subnets ${SOCO_SUBNETS}

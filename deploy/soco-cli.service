@@ -1,0 +1,28 @@
+[Unit]
+Description=SoCo-CLI HTTP API for Sonos
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+# SoCo-CLI HTTP API server on port 5001 (the app's default baseUrl).
+#
+# Speakers are on a different subnet than the Pi's WiFi, so SSDP multicast
+# discovery doesn't work. We use --use-local-speaker-list to load the cached
+# speaker list (built by soco-discover), and --subnets so /rediscover works.
+#
+# ExecStartPre runs discovery at boot to build/refresh the cache (~5-10 sec).
+# This delays the service start, but sonos-tt-flutter.service waits for us
+# anyway via After=soco-cli.service.
+#
+# CHANGE 192.168.0.0/24 below if your Sonos speakers are on a different subnet!
+Environment=PATH=/home/pi/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=SOCO_SUBNETS=192.168.0.0/24
+ExecStartPre=/home/pi/.local/bin/soco-discover --subnets ${SOCO_SUBNETS}
+ExecStart=/home/pi/.local/bin/soco-http-api-server --port 5001 --use-local-speaker-list --subnets ${SOCO_SUBNETS}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -19,6 +19,11 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/opt/sonos-tt /run/user/1000
 PrivateTmp=true
+# flutter-pi opens DRM/GPU/input devices directly. These are group-owned by
+# video (/dev/dri/card*), render (/dev/dri/renderD*), and input
+# (/dev/input/event*) on Raspberry Pi OS. SupplementaryGroups guarantees
+# access even if the User hasn't been manually added to all groups.
+SupplementaryGroups=video render input
 
 [Install]
 WantedBy=multi-user.target

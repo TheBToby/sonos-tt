@@ -1,7 +1,7 @@
 # sonos-tt Flutter Port
 
 Flutter frontend for the sonos-tt Sonos controller, designed to run on a
-Raspberry Pi 5 with a 1080×1080px circular touchscreen via **flutter-pi**
+Raspberry Pi 4 with a 1080×1080px circular touchscreen via **flutter-pi**
 (DRM/KMS, no desktop, no browser).
 
 ## Architecture
@@ -39,7 +39,7 @@ lib/
 - **Flutter SDK** 3.22+ (stable channel)
 - **flutter-pi** — [github.com/ardera/flutter-pi](https://github.com/ardera/flutter-pi)
 - **Raspberry Pi 5** with Raspberry Pi OS (no desktop needed)
-- **SoCo-CLI** running on the Pi or network (see root `README.md`)
+- **SoCo-CLI** HTTP API server running on the Pi (see [SoCo-CLI Backend Setup](#soco-cli-backend-setup) below)
 
 ## Testing Locally in VS Code (before Pi deployment)
 
@@ -122,9 +122,81 @@ flutter analyze
 # Run tests
 flutter test
 
-# Build for flutter-pi (on the Pi or cross-compile)
-flutter build linux --release
+# Install flutterpi_tool (required for Pi builds)
+# flutterpi_tool downloads the Flutter Engine (libflutter_engine.so) and
+# produces a flat bundle ready for flutter-pi. Without it, `flutter build linux`
+# produces a GTK desktop bundle that's missing the engine library.
+flutter pub global activate flutterpi_tool
+
+# Build for flutter-pi (aarch64, Pi 4-tuned engine)
+flutterpi_tool build --release --arch=arm64 --cpu=pi4
 ```
+
+## SoCo-CLI Backend Setup
+
+The Flutter app needs the [SoCo-CLI](https://github.com/avantrec/soco-cli) HTTP
+API server to talk to Sonos speakers. It runs on port 5001 (the app's default
+`baseUrl: http://localhost:5001`).
+
+### Automated setup (recommended)
+
+From your dev machine:
+
+```bash
+PI_HOST=pi@192.168.4.25 ./deploy/setup-soco-cli.sh
+```
+
+This will:
+1. Install `pip3` if missing
+2. Install `soco-cli` via `pip3 install --break-system-packages soco-cli`
+3. Discover Sonos speakers on your network
+4. Install systemd services (`soco-cli.service` + `soco-discover.timer`)
+5. Start the server and verify it responds
+
+**Important — Subnet configuration:**
+
+If your Sonos speakers are on a different subnet than the Pi (common when the Pi
+is on WiFi), SSDP multicast discovery won't find them. The scripts default to
+scanning `192.168.0.0/24`. Change this if your speakers are elsewhere:
+
+```bash
+SOCO_SUBNETS=192.168.1.0/24 PI_HOST=pi@192.168.4.25 ./deploy/setup-soco-cli.sh
+```
+
+You also need to update the subnet in `deploy/soco-cli.service` and
+`deploy/soco-discover.service` (the `SOCO_SUBNETS` environment variable).
+
+### Manual setup
+
+```bash
+# On the Pi:
+sudo apt install -y python3-pip
+pip3 install --break-system-packages soco-cli
+
+# Discover speakers (specify subnet if cross-VLAN):
+~/.local/bin/soco-discover --subnets 192.168.0.0/24
+
+# Start the HTTP API server:
+~/.local/bin/soco-http-api-server --port 5001 --use-local-speaker-list --subnets 192.168.0.0/24
+```
+
+### systemd services
+
+| Service | Purpose |
+|---------|---------|
+| `soco-cli.service` | HTTP API server on port 5001. Runs `soco-discover` at boot (ExecStartPre) to build speaker cache, then starts the server with `--use-local-speaker-list --subnets`. |
+| `soco-discover.service` | Refreshes speaker discovery cache. Triggered by `soco-discover.timer` every 30 min to catch new/removed speakers. |
+| `soco-discover.timer` | Timer for the above. |
+| `sonos-tt-flutter.service` | The Flutter app via flutter-pi. Has `After=soco-cli.service` so it waits for the backend. |
+
+```bash
+# Install all services:
+sudo cp /opt/sonos-tt/{soco-cli,soco-discover}.service /opt/sonos-tt/soco-discover.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now soco-cli.service soco-discover.timer
+```
+
+---
 
 ## Deploying to Raspberry Pi
 
@@ -171,10 +243,19 @@ sudo ldconfig    # refresh the shared-library cache
 which flutter-pi
 flutter-pi --help    # should print usage info
 
-# 1f. Give your user permission to use 3D acceleration.
-#     flutter-pi needs direct GPU access via DRM/KMS.
-sudo usermod -a -G render "$USER"
+# 1f. Give your user permission to access DRM/GPU/input devices.
+#     flutter-pi opens these directly (no X11/Wayland/desktop). On Raspberry
+#     Pi OS they are group-owned by:
+#       video  → /dev/dri/card*   (DRM/KMS display)
+#       render → /dev/dri/renderD* (GPU compute)
+#       input  → /dev/input/event* (touchscreen/input devices)
+#     Without all three, flutter-pi fails with:
+#       "Couldn't open DRM device. open: Permission denied"
+sudo usermod -aG video,render,input "$USER"
 #     (Log out and back in, or reboot, for this to take effect.)
+#     The deploy scripts also check and fix this automatically, and the
+#     systemd service uses SupplementaryGroups=video render input as a
+#     belt-and-braces fallback.
 ```
 
 > **Common `cmake ..` errors and fixes:**
@@ -200,29 +281,54 @@ sudo usermod -a -G render "$USER"
 >   `/usr/local/bin/flutter-pi` (see `deploy/sonos-tt-flutter.service`), so the
 >   service does not depend on `PATH` — only interactive shell use does.
 
-### 2. Build & deploy
+### 2. Install flutterpi_tool (one-time, on your dev machine)
 
-The build script detects your OS and handles cross-compilation automatically:
+`flutterpi_tool` is the official build tool for flutter-pi. It:
+- Downloads the correct Flutter Engine (`libflutter_engine.so`) automatically
+- Produces a flat bundle ready for flutter-pi (no manual flattening)
+- Works natively on macOS and Linux — **no remote build needed**
 
-- **macOS**: Syncs source to the Pi and builds **remotely** via SSH
-- **Linux**: Builds locally (requires aarch64 cross-compile toolchain)
+```bash
+# Install flutterpi_tool globally (one-time)
+flutter pub global activate flutterpi_tool
+
+# If flutterpi_tool isn't in your PATH after install, add the pub cache bin:
+export PATH="$PATH":"$HOME/.pub-cache/bin"
+```
+
+### 3. Build & deploy
+
+The build script uses `flutterpi_tool` to produce a complete flutter-pi bundle
+locally on your dev machine (macOS or Linux), then deploys it to the Pi via
+rsync. No Flutter SDK or build tools needed on the Pi.
 
 ```bash
 # From your dev machine (macOS or Linux)
-./deploy/build.sh                    # build (remote on macOS, local on Linux)
+./deploy/build.sh                    # build only
 ./deploy/build.sh --deploy           # build + deploy in one step
 ./deploy/deploy.sh                   # deploy an existing build to the Pi
 
-# Specify a custom Pi hostname
-PI_HOST=my-pi ./deploy/build.sh --deploy
+# Specify a custom Pi hostname/IP
+PI_HOST=pi@192.168.4.25 ./deploy/build.sh --deploy
+
+# Use a generic aarch64 engine instead of Pi 4-tuned
+PI_CPU=generic ./deploy/build.sh --deploy
 ```
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PI_HOST` | `raspberrypi` | SSH destination (`user@host` or `host`) |
+| `PI_ARCH` | `arm64` | Target architecture (`arm64`, `arm`, `x64`) |
+| `PI_CPU` | `pi4` | CPU-tuned engine (`pi4`, `generic`) |
+| `DEPLOY_DIR` | `/opt/sonos-tt` | Deploy path on the Pi |
 
 **Where things live on the Pi:**
 
 | Path | What | Notes |
 |------|------|-------|
-| `~/sonos-tt-src` | Remote source checkout + build output | Inside the user's home — no sudo needed. Override with `REMOTE_DIR=...`. |
-| `/opt/sonos-tt` | Final deployed bundle (read by flutter-pi) | `/opt` is root-owned. The scripts create it **once** via `sudo mkdir` + `chown` to your user, then subsequent deploys run without sudo. Override with `DEPLOY_DIR=...`. |
+| `/opt/sonos-tt` | Final deployed bundle (read by flutter-pi) | `/opt` is root-owned. The scripts create it **once** via `sudo mkdir` + `chown` to your user, then subsequent deploys run without sudo. |
 
 The first `--deploy` will prompt for the sudo password (to create `/opt/sonos-tt`).
 If you prefer to set it up manually once:
@@ -231,38 +337,7 @@ If you prefer to set it up manually once:
 ssh pi@raspberrypi 'sudo mkdir -p /opt/sonos-tt && sudo chown $USER:$USER /opt/sonos-tt'
 ```
 
-**Requirements for macOS remote build:**
-- SSH key access to the Pi: `ssh-copy-id pi@raspberrypi`
-  (If your Pi username isn't the same as your Mac username, include it in
-  `PI_HOST`, e.g. `PI_HOST=pi@192.168.0.25`)
-- Flutter SDK installed on the Pi **and visible to non-interactive SSH** (the
-  build runs via `ssh pi@host "flutter ..."`):
-
-```bash
-# Install Flutter on the Pi (one-time setup)
-ssh pi@raspberrypi
-# Flutter's `flutter build linux` requires the Linux desktop toolchain
-# (clang/g++ compiler, ninja build system, GTK headers):
-sudo apt install -y git curl clang g++ cmake pkg-config ninja-build libgtk-3-dev
-git clone https://github.com/flutter/flutter.git ~/flutter
-
-# IMPORTANT: Add Flutter to the SYSTEM PATH, not just ~/.bashrc.
-# Non-interactive SSH (used by deploy/build.sh) does not source ~/.bashrc on
-# Raspberry Pi OS, so a PATH export appended there is not applied. A symlink
-# in /usr/local/bin is the most reliable fix:
-sudo ln -s "$HOME/flutter/bin/flutter" /usr/local/bin/flutter
-
-# Verify it is found both interactively AND non-interactively:
-flutter doctor
-ssh pi@raspberrypi 'command -v flutter'   # must print a path
-```
-
-> **Note:** If you previously followed instructions that appended
-> `export PATH=...:$HOME/flutter/bin` to `~/.bashrc` and still see
-> `ERROR: Flutter not found on <pi>` from `build.sh`, the cause is the
-> non-interactive SSH PATH. Run the `sudo ln -s ...` command above.
-
-### 3. Run as systemd service
+### 4. Run as systemd service
 
 ```bash
 # On the Pi

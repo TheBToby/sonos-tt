@@ -236,7 +236,21 @@ class AppState extends ChangeNotifier {
   }
 
   void _handleError(Object error) {
-    print('[poll] error: $error');
+    // Suppress expected connection-refused errors — these happen on every poll
+    // when the SoCo-CLI server isn't running (e.g., first boot, dev/testing).
+    // The API layer falls back to mock mode after 5 consecutive failures, so
+    // printing each one just spams the console with alarming messages.
+    // Only print genuinely unexpected errors (not network/connection issues).
+    final msg = error.toString();
+    final isConnectionError = msg.contains('Connection refused') ||
+        msg.contains('SocketException') ||
+        msg.contains('Connection timed out') ||
+        msg.contains('Network is unreachable') ||
+        msg.contains('Software caused connection abort') ||
+        msg.contains('timeout');
+    if (!isConnectionError) {
+      print('[poll] error: $error');
+    }
     _connection = _connection.copyWith(connected: false, error: error.toString());
     notifyListeners();
   }
