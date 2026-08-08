@@ -42,9 +42,9 @@ class BarPanel extends StatelessWidget {
     // Title bar — doubled in width for a bolder, more prominent look.
     final titleBarWidth = size * 0.07; // ≈ 76px on a 1080px screen
 
-    // Close area — decreased by 50% from the previous full-remaining-width
-    // approach (was ~size * 0.285, now ~size * 0.14).
-    final closeAreaWidth = size * 0.14; // ≈ 151px on a 1080px screen
+    // Close area — uses the FULL width from the left screen edge to the title
+    // bar, as requested. This gives a generous tap target for the back icon.
+    final closeAreaWidth = size - contentWidth - titleBarWidth;
 
     return Container(
       width: size,
