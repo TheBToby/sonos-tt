@@ -30,7 +30,7 @@ class _PlaylistsPanelState extends State<PlaylistsPanel> {
     final queue = state.sonos.activeQueue;
 
     return SingleChildScrollView(
-      padding: EdgeInsets.symmetric(horizontal: s * 0.02, vertical: s * 0.02),
+      padding: EdgeInsets.symmetric(horizontal: s * 0.02, vertical: s * 0.1),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -55,8 +55,8 @@ class _PlaylistsPanelState extends State<PlaylistsPanel> {
                       ),
                       child: Row(
                         children: [
-                          const Text('🎵', style: TextStyle(fontSize: 16)),
-                          const SizedBox(width: 8),
+                          Icon(Icons.queue_music, size: s * 0.03, color: c.accent),
+                          SizedBox(width: s * 0.015),
                           Expanded(
                             child: Text(
                               pl.title,

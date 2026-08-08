@@ -74,10 +74,15 @@ class AppTheme {
     required Color vinyl,
     required bool isDark,
   }) {
+    // Roboto is Flutter's standard Material font — clean, modern, highly legible.
+    // It is bundled with the Flutter engine (including flutter-pi), so it works
+    // on every platform without additional font files or network access.
+    const font = 'Roboto';
     return ThemeData(
       brightness: isDark ? Brightness.dark : Brightness.light,
       scaffoldBackgroundColor: bg,
       canvasColor: bg,
+      fontFamily: font,
       colorScheme: ColorScheme(
         brightness: isDark ? Brightness.dark : Brightness.light,
         primary: accent,
@@ -87,13 +92,14 @@ class AppTheme {
         surface: surface,
         onSurface: text,
         error: danger,
-        onError: isDark ? const Color(0xFFCF6679) : const Color(0xFFB3261E),
+        onError: isDark ? const Color(0xFFCF6679) : const Color(0xFFB3266E),
       ),
       textTheme: TextTheme(
-        bodyMedium: TextStyle(color: text, fontSize: 14),
-        bodySmall: TextStyle(color: textDim, fontSize: 12),
-        labelSmall: TextStyle(color: textDim, fontSize: 10),
-        titleMedium: TextStyle(color: text, fontSize: 16, fontWeight: FontWeight.w600),
+        bodyMedium: TextStyle(color: text, fontSize: 14, fontFamily: font),
+        bodySmall: TextStyle(color: textDim, fontSize: 12, fontFamily: font),
+        labelSmall: TextStyle(color: textDim, fontSize: 10, fontFamily: font),
+        titleMedium:
+            TextStyle(color: text, fontSize: 16, fontWeight: FontWeight.w600, fontFamily: font),
       ),
       extensions: <ThemeExtension<dynamic>>[
         SonosColors(

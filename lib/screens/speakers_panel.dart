@@ -31,12 +31,12 @@ class _SpeakersPanelState extends State<SpeakersPanel> {
     if (sonos.speakers.isEmpty) {
       return Center(
         child: Text(state.t('speakers.none_found'),
-            style: TextStyle(color: c.textDim, fontSize: s * 0.028)),
+            style: TextStyle(color: c.textDim, fontSize: s * 0.04)),
       );
     }
 
     return SingleChildScrollView(
-      padding: EdgeInsets.symmetric(horizontal: s * 0.02, vertical: s * 0.02),
+      padding: EdgeInsets.symmetric(horizontal: s * 0.03, vertical: s * 0.1),
       child: Column(
         children: [
           // Grouped speakers
@@ -48,6 +48,7 @@ class _SpeakersPanelState extends State<SpeakersPanel> {
             final isExpanded = expandedGroup == g.coordinatorUid;
 
             return SpeakerCard(
+              size: s,
               name: coord.name,
               volume: coord.volume,
               isActive: coord.uid == sonos.activeSpeakerUid,
@@ -60,6 +61,7 @@ class _SpeakersPanelState extends State<SpeakersPanel> {
                   ? Column(
                       children: members.map((m) {
                         return SpeakerCard(
+                          size: s,
                           name: m.name,
                           volume: m.volume,
                           isActive: m.uid == sonos.activeSpeakerUid,
@@ -73,6 +75,7 @@ class _SpeakersPanelState extends State<SpeakersPanel> {
           }),
           // Solo speakers
           ...soloSpeakers.map((sp) => SpeakerCard(
+                size: s,
                 name: sp.name,
                 volume: sp.volume,
                 isActive: sp.uid == sonos.activeSpeakerUid,
@@ -86,6 +89,7 @@ class _SpeakersPanelState extends State<SpeakersPanel> {
 }
 
 class SpeakerCard extends StatelessWidget {
+  final double size;
   final String name;
   final int volume;
   final bool isActive;
@@ -98,6 +102,7 @@ class SpeakerCard extends StatelessWidget {
 
   const SpeakerCard({
     super.key,
+    required this.size,
     required this.name,
     required this.volume,
     required this.isActive,
@@ -113,7 +118,7 @@ class SpeakerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Container(
         decoration: BoxDecoration(
           color: c.surface2,
@@ -125,37 +130,38 @@ class SpeakerCard extends StatelessWidget {
             GestureDetector(
               onTap: onTap,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: EdgeInsets.symmetric(horizontal: size * 0.02, vertical: size * 0.017),
                 child: Row(
                   children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isCoordinator ? c.accent : c.textDim,
-                      ),
+                    // Speaker icon — coordinator vs member
+                    Icon(
+                      isCoordinator ? Icons.speaker : Icons.speaker_group_outlined,
+                      size: size * 0.032,
+                      color: isCoordinator ? c.accent : c.textDim,
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: size * 0.017),
                     Expanded(
                       child: Text(
                         '$name${suffix != null ? ' $suffix' : ''}',
                         style: TextStyle(
                           color: c.text,
-                          fontSize: 14,
+                          fontSize: size * 0.045,
                           fontWeight: FontWeight.w600,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Text('🔊 $volume', style: TextStyle(color: c.textDim, fontSize: 11)),
+                    // Volume with Material icon
+                    Icon(Icons.volume_up, size: size * 0.026, color: c.textDim),
+                    SizedBox(width: size * 0.006),
+                    Text('$volume', style: TextStyle(color: c.textDim, fontSize: size * 0.038)),
                     if (onExpand != null) ...[
-                      const SizedBox(width: 4),
+                      SizedBox(width: size * 0.012),
                       GestureDetector(
                         onTap: onExpand,
                         child: Icon(
                           expanded ? Icons.expand_more : Icons.chevron_right,
-                          size: 18,
+                          size: size * 0.032,
                           color: c.textDim,
                         ),
                       ),

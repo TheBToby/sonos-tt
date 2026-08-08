@@ -20,7 +20,10 @@ class DialogLayer extends StatelessWidget {
     }
 
     final title = _titleForView(state, view);
-    final size = MediaQuery.of(context).size.shortestSide;
+    final screenSize = MediaQuery.of(context).size.shortestSide;
+    // Content area is 68% of screen width — pass this as the panel size so
+    // panels scale their padding/fonts to the actual available space.
+    final contentSize = screenSize * 0.68;
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
@@ -28,7 +31,7 @@ class DialogLayer extends StatelessWidget {
         key: ValueKey(view),
         title: title,
         onClose: () => state.setView(AppView.turntable),
-        child: _buildContent(view, size),
+        child: _buildContent(view, contentSize),
       ),
     );
   }

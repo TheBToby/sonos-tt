@@ -18,7 +18,7 @@ class UsersPanel extends StatelessWidget {
     final defaultId = state.config.spotify.defaultAccount;
 
     return SingleChildScrollView(
-      padding: EdgeInsets.symmetric(horizontal: s * 0.03, vertical: s * 0.03),
+      padding: EdgeInsets.symmetric(horizontal: s * 0.03, vertical: s * 0.1),
       child: Column(
         children: accounts.map((acc) {
           final isCurrent = acc.id == defaultId;
@@ -71,7 +71,7 @@ class UsersPanel extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (!isCurrent) Icon(Icons.arrow_forward_ios, size: 14, color: c.textDim),
+                    if (!isCurrent) Icon(Icons.chevron_right, size: s * 0.035, color: c.textDim),
                   ],
                 ),
               ),

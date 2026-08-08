@@ -51,7 +51,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     final conn = state.connection;
 
     return SingleChildScrollView(
-      padding: EdgeInsets.symmetric(horizontal: s * 0.025, vertical: s * 0.02),
+      padding: EdgeInsets.symmetric(horizontal: s * 0.025, vertical: s * 0.1),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -109,8 +109,15 @@ class _SettingsPanelState extends State<SettingsPanel> {
                         color: c.accent.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(999),
                       ),
-                      child: Text(state.t('connection.retry'),
-                          style: TextStyle(color: c.accent, fontSize: s * 0.022)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.refresh, size: s * 0.024, color: c.accent),
+                          SizedBox(width: s * 0.008),
+                          Text(state.t('connection.retry'),
+                              style: TextStyle(color: c.accent, fontSize: s * 0.022)),
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -167,39 +174,49 @@ class _SettingsPanelState extends State<SettingsPanel> {
               (v) => setState(() => _spinDuration = v),
               suffix: 's'),
           const SizedBox(height: 20),
-          // Buttons
+          // Buttons with Material icons
           Row(
             children: [
               Expanded(
                 child: GestureDetector(
                   onTap: () => state.resetConfig(),
                   child: Container(
-                    padding: EdgeInsets.symmetric(vertical: s * 0.02),
+                    padding: EdgeInsets.symmetric(vertical: s * 0.022),
                     decoration: BoxDecoration(
                       color: c.surface2,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Center(
-                      child: Text(state.t('settings.reset'),
-                          style: TextStyle(color: c.textDim, fontSize: s * 0.026)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.refresh, size: s * 0.03, color: c.textDim),
+                        SizedBox(width: s * 0.012),
+                        Text(state.t('settings.reset'),
+                            style: TextStyle(color: c.textDim, fontSize: s * 0.028)),
+                      ],
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(
                 child: GestureDetector(
                   onTap: _save,
                   child: Container(
-                    padding: EdgeInsets.symmetric(vertical: s * 0.02),
+                    padding: EdgeInsets.symmetric(vertical: s * 0.022),
                     decoration: BoxDecoration(
                       color: c.accent,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Center(
-                      child: Text(state.t('settings.save'),
-                          style: TextStyle(
-                              color: c.bg, fontSize: s * 0.026, fontWeight: FontWeight.w600)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.check, size: s * 0.03, color: c.bg),
+                        SizedBox(width: s * 0.012),
+                        Text(state.t('settings.save'),
+                            style: TextStyle(
+                                color: c.bg, fontSize: s * 0.028, fontWeight: FontWeight.w600)),
+                      ],
                     ),
                   ),
                 ),

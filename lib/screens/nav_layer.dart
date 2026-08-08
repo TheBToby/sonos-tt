@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -99,29 +100,44 @@ class NavLayer extends StatelessWidget {
         child: SizedBox(
           width: size,
           height: size,
-          child: CustomPaint(
-            painter: RadialNavPainter(
-              cx: cx,
-              cy: cy,
-              innerR: innerR,
-              outerR: outerR,
-              centerR: centerR,
-              segments: _segments,
-              segAngle: segAngle,
-              gap: gap,
-              navVisible: navVisible,
-              isPlaying: state.sonos.activePlayback.isPlaying,
-              volumeMode: state.volumeMode,
-              colors: NavColors(
-                glass: c.glass,
-                surface: c.surface,
-                surface2: c.surface2,
-                accent: c.accent,
-                text: c.text,
-                scrim: c.scrim,
-                glassBorder: c.glassBorder,
+          child: Stack(
+            children: [
+              // Blur + darken backdrop when nav is visible
+              if (navVisible)
+                Positioned.fill(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      color: c.scrim.withValues(alpha: 0.3),
+                    ),
+                  ),
+                ),
+              // Radial nav UI
+              CustomPaint(
+                painter: RadialNavPainter(
+                  cx: cx,
+                  cy: cy,
+                  innerR: innerR,
+                  outerR: outerR,
+                  centerR: centerR,
+                  segments: _segments,
+                  segAngle: segAngle,
+                  gap: gap,
+                  navVisible: navVisible,
+                  isPlaying: state.sonos.activePlayback.isPlaying,
+                  volumeMode: state.volumeMode,
+                  colors: NavColors(
+                    glass: c.glass,
+                    surface: c.surface,
+                    surface2: c.surface2,
+                    accent: c.accent,
+                    text: c.text,
+                    scrim: c.scrim,
+                    glassBorder: c.glassBorder,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),
@@ -172,12 +188,12 @@ class RadialNavPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Scrim background (semi-transparent when nav visible)
+    // Scrim background (additional darkening on top of the BackdropFilter blur)
     if (navVisible) {
       canvas.drawCircle(
         Offset(cx, cy),
         size.width / 2,
-        Paint()..color = colors.scrim.withValues(alpha: 0.5),
+        Paint()..color = colors.scrim.withValues(alpha: 0.2),
       );
     }
 

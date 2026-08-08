@@ -2,15 +2,21 @@ import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
 
-/// Reusable dialog frame with a left sidebar title bar and close button.
+/// Full-screen dialog frame with a left close area, vertical title bar, and content.
 ///
 /// Layout (left to right):
-///   [close bar] [vertical title bar] [content]
+///   [close area] [vertical title bar] [content]
 ///
-/// The close bar is a dedicated tappable strip to the LEFT of the title bar.
-/// It spans the full dialog height with a vertically centered close icon, so
-/// it sits within the visible area of the circular display (the old design
-/// put the close button in the bottom corner, which was clipped by the circle).
+/// Design decisions for the circular display:
+/// - **Full-screen**: No rounded borders, shadows, or margin. The dialog fills
+///   the full screen but the content area keeps its original size/position so
+///   it stays within the visible circle.
+/// - **Close area**: A proportional area on the left edge with a generously
+///   sized back icon and "BACK" label, vertically centered for guaranteed
+///   visibility on the circle.
+/// - **Back icon**: Uses `Icons.arrow_back` (a left-pointing arrow) instead of
+///   an X, following Material design patterns for returning to the previous
+///   screen.
 class BarPanel extends StatelessWidget {
   final String title;
   final Widget child;
@@ -28,95 +34,127 @@ class BarPanel extends StatelessWidget {
     final c = context.c;
     final size = MediaQuery.of(context).size.shortestSide;
 
+    // Content area dimensions — kept the same to preserve visibility on the
+    // circular display.
+    final contentWidth = size * 0.68;
+    final contentHeight = size * 0.72;
+
+    // Title bar — doubled in width for a bolder, more prominent look.
+    final titleBarWidth = size * 0.07; // ≈ 76px on a 1080px screen
+
+    // Close area — decreased by 50% from the previous full-remaining-width
+    // approach (was ~size * 0.285, now ~size * 0.14).
+    final closeAreaWidth = size * 0.14; // ≈ 151px on a 1080px screen
+
     return Container(
       width: size,
       height: size,
-      color: c.scrim,
-      child: Center(
-        child: Container(
-          width: size * 0.82,
-          height: size * 0.72,
-          decoration: BoxDecoration(
-            color: c.glass,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: c.glassBorder),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.5),
-                blurRadius: 40,
-                offset: const Offset(0, 15),
-              ),
-            ],
+      color: c.bg,
+      child: Stack(
+        children: [
+          // ─── Close area (left edge → title bar) ───────────────────────────
+          // Full height, back icon vertically centered. This position is at
+          // roughly 1/6 of the screen width — well within the visible circle.
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: closeAreaWidth,
+            child: _CloseArea(onClose: onClose, size: size),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: Row(
-            children: [
-              // Close bar (leftmost) — full height, vertically centered icon.
-              // Uses surface3 to distinguish it from the title bar.
-              _CloseBar(onClose: onClose),
-              // Vertical title bar
-              Container(
-                width: 32,
-                color: c.surface2,
-                child: RotatedBox(
-                  quarterTurns: 3,
-                  child: Center(
-                    child: Text(
-                      title.toUpperCase(),
-                      style: TextStyle(
-                        color: c.accent,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 2,
-                      ),
+          // ─── Vertical title bar ───────────────────────────────────────────
+          Positioned(
+            left: closeAreaWidth,
+            top: 0,
+            bottom: 0,
+            width: titleBarWidth,
+            child: Container(
+              color: c.surface2,
+              child: RotatedBox(
+                quarterTurns: 3,
+                child: Center(
+                  child: Text(
+                    title.toUpperCase(),
+                    style: TextStyle(
+                      color: c.accent,
+                      fontSize: size * 0.026,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: size * 0.005,
                     ),
                   ),
                 ),
               ),
-              // Content area
-              Expanded(child: child),
-            ],
+            ),
           ),
-        ),
+          // ─── Content area ─────────────────────────────────────────────────
+          // Positioned to the right of the title bar, vertically centered.
+          // Panels handle their own scrolling; the content height is preserved
+          // so visibility on the circular display is guaranteed.
+          Positioned(
+            left: closeAreaWidth + titleBarWidth,
+            top: (size - contentHeight) / 2,
+            width: contentWidth,
+            height: contentHeight,
+            child: child,
+          ),
+        ],
       ),
     );
   }
 }
 
-/// Tappable close bar on the far left of the dialog.
+/// Tappable close area with a back icon and label.
 ///
-/// A 36px-wide strip spanning the full dialog height. The close icon is
-/// vertically centered so it stays within the visible circle on the
-/// circular display. Provides visual press feedback via [Ink].
-class _CloseBar extends StatefulWidget {
+/// Uses `Icons.arrow_back` (a back arrow) instead of a close X, following
+/// Material Design's navigation patterns for returning to the parent screen.
+/// The icon is vertically centered and provides press-feedback animation.
+class _CloseArea extends StatefulWidget {
   final VoidCallback onClose;
+  final double size;
 
-  const _CloseBar({required this.onClose});
+  const _CloseArea({required this.onClose, required this.size});
 
   @override
-  State<_CloseBar> createState() => _CloseBarState();
+  State<_CloseArea> createState() => _CloseAreaState();
 }
 
-class _CloseBarState extends State<_CloseBar> {
+class _CloseAreaState extends State<_CloseArea> {
   bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final s = widget.size;
     return GestureDetector(
       onTapDown: (_) => setState(() => _pressed = true),
       onTapUp: (_) => setState(() => _pressed = false),
       onTapCancel: () => setState(() => _pressed = false),
       onTap: widget.onClose,
+      behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 80),
-        width: 36,
-        color: _pressed ? c.accent.withValues(alpha: 0.25) : c.surface3,
+        duration: const Duration(milliseconds: 100),
+        color: _pressed ? c.accent.withValues(alpha: 0.2) : Colors.transparent,
         alignment: Alignment.center,
-        child: Icon(
-          Icons.close,
-          size: 22,
-          color: _pressed ? c.text : c.textDim,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.arrow_back,
+              size: s * 0.05,
+              color: _pressed ? c.accent : c.textDim,
+            ),
+            SizedBox(height: s * 0.008),
+            Text(
+              'BACK',
+              style: TextStyle(
+                color: _pressed ? c.accent : c.textFaint,
+                fontSize: s * 0.016,
+                fontWeight: FontWeight.w600,
+                letterSpacing: s * 0.0025,
+              ),
+            ),
+          ],
         ),
       ),
     );

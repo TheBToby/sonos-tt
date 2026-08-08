@@ -299,13 +299,22 @@ class _TurntableLayerState extends State<TurntableLayer> {
                   ),
                   child: Column(
                     children: [
-                      Text(
-                        '⚠️ ${state.t('connection.mock_title')}',
-                        style: TextStyle(
-                          color: Colors.orange,
-                          fontSize: size * 0.022,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.warning_amber_rounded,
+                              size: size * 0.028, color: Colors.orange),
+                          SizedBox(width: size * 0.008),
+                          Text(
+                            state.t('connection.mock_title'),
+                            style: TextStyle(
+                              color: Colors.orange,
+                              fontSize: size * 0.022,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
                       ),
                       SizedBox(height: size * 0.005),
                       Text(
@@ -331,12 +340,19 @@ class _TurntableLayerState extends State<TurntableLayer> {
                             ),
                             borderRadius: BorderRadius.circular(999),
                           ),
-                          child: Text(
-                            '↻ ${state.t('connection.retry')}',
-                            style: TextStyle(
-                              color: Colors.orange,
-                              fontSize: size * 0.019,
-                            ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.refresh, size: size * 0.022, color: Colors.orange),
+                              SizedBox(width: size * 0.008),
+                              Text(
+                                state.t('connection.retry'),
+                                style: TextStyle(
+                                  color: Colors.orange,
+                                  fontSize: size * 0.019,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
