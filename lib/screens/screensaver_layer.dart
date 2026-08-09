@@ -157,15 +157,15 @@ class AnalogPainter extends CustomPainter {
       );
     }
 
-    // Numbers at 12, 3, 6, 9 positions
+    // Numbers at 12, 3, 6, 9 positions — increased size + Montserrat font
     final numbers = ['12', '3', '6', '9'];
-    final numR = r - 40;
+    final numR = r - 55;
     for (var i = 0; i < 4; i++) {
       final deg = i * 90 - 90;
       final rad = deg * math.pi / 180;
       final x = cx + numR * math.cos(rad);
       final y = cy + numR * math.sin(rad);
-      _drawText(canvas, numbers[i], x, y, 32, Colors.white.withValues(alpha: 0.9));
+      _drawText(canvas, numbers[i], x, y, r * 0.12, Colors.white.withValues(alpha: 0.9));
     }
 
     // Hour hand — doubled width
@@ -208,7 +208,8 @@ class AnalogPainter extends CustomPainter {
         style: TextStyle(
           color: color,
           fontSize: fontSize,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
+          fontFamily: 'Montserrat',
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -250,6 +251,7 @@ class DigitalClock extends StatelessWidget {
                       color: Colors.white,
                       fontSize: size * 0.18,
                       fontWeight: FontWeight.w700,
+                      fontFamily: 'Orbitron',
                     )),
                 const SizedBox(width: 8),
                 Text(s,
@@ -257,6 +259,7 @@ class DigitalClock extends StatelessWidget {
                       color: const Color(0xFF4fc3f7),
                       fontSize: size * 0.072,
                       fontWeight: FontWeight.w700,
+                      fontFamily: 'Orbitron',
                     )),
               ],
             ),

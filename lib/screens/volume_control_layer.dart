@@ -178,51 +178,47 @@ class _CircularVolumeSliderState extends State<_CircularVolumeSlider> {
                 trackColor: widget.surface2,
               ),
             ),
-            // Volume value with % in center
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Volume value with % sign
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: '$_value',
-                        style: TextStyle(
-                          color: widget.text,
-                          fontSize: widget.radius * 0.48,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      TextSpan(
-                        text: '%',
-                        style: TextStyle(
-                          color: widget.textDim,
-                          fontSize: widget.radius * 0.28,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(height: widget.radius * 0.18),
-                // Close button
-                GestureDetector(
-                  onTap: widget.onClose,
-                  child: Container(
-                    padding: EdgeInsets.all(widget.radius * 0.08),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: widget.surface2.withValues(alpha: 0.8),
+            // Volume value with % — centered vertically in the ring
+            RichText(
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: '$_value',
+                    style: TextStyle(
+                      color: widget.text,
+                      fontSize: widget.radius * 0.48,
+                      fontWeight: FontWeight.w700,
                     ),
-                    child: Icon(
-                      Icons.close,
-                      size: widget.radius * 0.16,
+                  ),
+                  TextSpan(
+                    text: '%',
+                    style: TextStyle(
                       color: widget.textDim,
+                      fontSize: widget.radius * 0.28,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
+                ],
+              ),
+            ),
+            // Close button — positioned at the bottom of the ring
+            Positioned(
+              bottom: widget.radius * 0.15,
+              child: GestureDetector(
+                onTap: widget.onClose,
+                child: Container(
+                  padding: EdgeInsets.all(widget.radius * 0.08),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: widget.surface2.withValues(alpha: 0.8),
+                  ),
+                  child: Icon(
+                    Icons.close,
+                    size: widget.radius * 0.16,
+                    color: widget.textDim,
+                  ),
                 ),
-              ],
+              ),
             ),
           ],
         ),
