@@ -254,11 +254,14 @@ class DigitalClock extends StatelessWidget {
                       fontFamily: 'Orbitron',
                     )),
                 const SizedBox(width: 8),
-                // Fixed-width container so seconds don't shift the layout
+                // Fixed-width container so seconds don't shift the layout.
+                // Width is sized to fit the widest 2-digit number ("00"–"59")
+                // in the Orbitron font without wrapping.
                 SizedBox(
-                  width: size * 0.09,
+                  width: size * 0.14,
                   child: Text(s,
                       textAlign: TextAlign.center,
+                      maxLines: 1,
                       style: TextStyle(
                         color: const Color(0xFF4fc3f7),
                         fontSize: size * 0.072,

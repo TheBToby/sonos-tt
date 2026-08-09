@@ -205,10 +205,10 @@ class _TurntableLayerState extends State<TurntableLayer> {
                 ),
               ),
             ),
-            // Speaker name at top
+            // Speaker name at top — moved up 5% for better vertical balance
             if (state.sonos.activeSpeaker?.name.isNotEmpty ?? false)
               Positioned(
-                top: size * 0.25,
+                top: size * 0.20,
                 left: 0,
                 right: 0,
                 child: Container(
@@ -227,9 +227,10 @@ class _TurntableLayerState extends State<TurntableLayer> {
                   ),
                 ),
               ),
-            // Track info at bottom
+            // Track info at bottom — positioned so the gap from center
+            // matches the speaker name bar (symmetric vertical balance)
             Positioned(
-              bottom: size * 0.23,
+              bottom: size * 0.17,
               left: 0,
               right: 0,
               child: Container(
