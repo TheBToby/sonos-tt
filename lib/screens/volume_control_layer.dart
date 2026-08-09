@@ -178,29 +178,34 @@ class _CircularVolumeSliderState extends State<_CircularVolumeSlider> {
                 trackColor: widget.surface2,
               ),
             ),
-            // Volume number in center
+            // Volume value with % in center
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  '$_value',
-                  style: TextStyle(
-                    color: widget.text,
-                    fontSize: widget.radius * 0.42,
-                    fontWeight: FontWeight.w700,
+                // Volume value with % sign
+                RichText(
+                  text: TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '$_value',
+                        style: TextStyle(
+                          color: widget.text,
+                          fontSize: widget.radius * 0.48,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      TextSpan(
+                        text: '%',
+                        style: TextStyle(
+                          color: widget.textDim,
+                          fontSize: widget.radius * 0.28,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                SizedBox(height: widget.radius * 0.02),
-                Text(
-                  'VOL',
-                  style: TextStyle(
-                    color: widget.textDim,
-                    fontSize: widget.radius * 0.12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 4,
-                  ),
-                ),
-                SizedBox(height: widget.radius * 0.15),
+                SizedBox(height: widget.radius * 0.18),
                 // Close button
                 GestureDetector(
                   onTap: widget.onClose,

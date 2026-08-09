@@ -157,6 +157,17 @@ class AnalogPainter extends CustomPainter {
       );
     }
 
+    // Numbers at 12, 3, 6, 9 positions
+    final numbers = ['12', '3', '6', '9'];
+    final numR = r - 40;
+    for (var i = 0; i < 4; i++) {
+      final deg = i * 90 - 90;
+      final rad = deg * math.pi / 180;
+      final x = cx + numR * math.cos(rad);
+      final y = cy + numR * math.sin(rad);
+      _drawText(canvas, numbers[i], x, y, 32, Colors.white.withValues(alpha: 0.9));
+    }
+
     // Hour hand — doubled width
     _drawHand(canvas, cx, cy, hourAngle, r * 0.48, 10, Colors.white);
     // Minute hand — doubled width
@@ -188,6 +199,21 @@ class AnalogPainter extends CustomPainter {
         ..strokeWidth = width
         ..strokeCap = StrokeCap.round,
     );
+  }
+
+  void _drawText(Canvas canvas, String text, double x, double y, double fontSize, Color color) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: color,
+          fontSize: fontSize,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    textPainter.paint(canvas, Offset(x - textPainter.width / 2, y - textPainter.height / 2));
   }
 
   @override
@@ -223,14 +249,14 @@ class DigitalClock extends StatelessWidget {
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: size * 0.18,
-                      fontWeight: FontWeight.w200,
+                      fontWeight: FontWeight.w700,
                     )),
                 const SizedBox(width: 8),
                 Text(s,
                     style: TextStyle(
                       color: const Color(0xFF4fc3f7),
                       fontSize: size * 0.072,
-                      fontWeight: FontWeight.w300,
+                      fontWeight: FontWeight.w700,
                     )),
               ],
             ),
