@@ -218,14 +218,14 @@ class RadialNavPainter extends CustomPainter {
           ..strokeWidth = 0.5,
       );
 
-      // Draw icon
+      // Draw icon — doubled in size for better visibility
       if (navVisible) {
         final midDeg = i * segAngle + segAngle / 2;
         final midRad = (midDeg - 90) * math.pi / 180;
         final iconR = (innerR + outerR) / 2;
         final ix = cx + iconR * math.cos(midRad);
         final iy = cy + iconR * math.sin(midRad);
-        _drawIcon(canvas, segments[i].icon, ix, iy, 14, colors.text);
+        _drawIcon(canvas, segments[i].icon, ix, iy, 28, colors.text);
       }
     }
 

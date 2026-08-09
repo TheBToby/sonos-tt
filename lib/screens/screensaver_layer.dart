@@ -90,7 +90,8 @@ class AnalogClock extends StatelessWidget {
     final hourAngle = (h + m / 60) * 30;
     final minAngle = (m + s / 60) * 6;
     final secAngle = (s * 6).toDouble();
-    final clockSize = size * 0.70;
+    // Use the full screen size for the clock face
+    final clockSize = size;
 
     return Stack(
       alignment: Alignment.center,
@@ -135,17 +136,17 @@ class AnalogPainter extends CustomPainter {
     final cy = size.height / 2;
     final r = size.width / 2 - 8;
 
-    // Face
+    // Face — doubled line weight
     final facePaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.5)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
+      ..strokeWidth = 3.0;
     canvas.drawCircle(Offset(cx, cy), r, facePaint);
 
-    // Ticks
+    // Ticks — doubled line weight
     final tickPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.7)
-      ..strokeWidth = 1.5;
+      ..strokeWidth = 3.0;
     for (var i = 0; i < 12; i++) {
       final angle = (i * 30 - 90) * math.pi / 180;
       final inner = i % 3 == 0 ? r - 10 : r - 4;
@@ -156,24 +157,24 @@ class AnalogPainter extends CustomPainter {
       );
     }
 
-    // Hour hand
-    _drawHand(canvas, cx, cy, hourAngle, r * 0.48, 5, Colors.white);
-    // Minute hand
-    _drawHand(canvas, cx, cy, minAngle, r * 0.68, 3, Colors.white);
-    // Second hand
-    _drawHand(canvas, cx, cy, secAngle, r * 0.78, 1.5, const Color(0xFF4fc3f7));
-    // Second tail
+    // Hour hand — doubled width
+    _drawHand(canvas, cx, cy, hourAngle, r * 0.48, 10, Colors.white);
+    // Minute hand — doubled width
+    _drawHand(canvas, cx, cy, minAngle, r * 0.68, 6, Colors.white);
+    // Second hand — doubled width
+    _drawHand(canvas, cx, cy, secAngle, r * 0.78, 3.0, const Color(0xFF4fc3f7));
+    // Second tail — doubled width
     final secRad = (secAngle - 90) * math.pi / 180;
     canvas.drawLine(
       Offset(cx, cy),
       Offset(cx - r * 0.1 * math.cos(secRad), cy - r * 0.1 * math.sin(secRad)),
       Paint()
         ..color = const Color(0xFF4fc3f7)
-        ..strokeWidth = 1.5
+        ..strokeWidth = 3.0
         ..strokeCap = StrokeCap.round,
     );
-    // Pivot
-    canvas.drawCircle(Offset(cx, cy), 4, Paint()..color = const Color(0xFF4fc3f7));
+    // Pivot — doubled size
+    canvas.drawCircle(Offset(cx, cy), 8, Paint()..color = const Color(0xFF4fc3f7));
   }
 
   void _drawHand(Canvas canvas, double cx, double cy, double angleDeg, double length, double width,
@@ -221,14 +222,14 @@ class DigitalClock extends StatelessWidget {
                 Text('$h:$m',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: size * 0.12,
+                      fontSize: size * 0.18,
                       fontWeight: FontWeight.w200,
                     )),
                 const SizedBox(width: 8),
                 Text(s,
                     style: TextStyle(
                       color: const Color(0xFF4fc3f7),
-                      fontSize: size * 0.048,
+                      fontSize: size * 0.072,
                       fontWeight: FontWeight.w300,
                     )),
               ],
@@ -237,7 +238,7 @@ class DigitalClock extends StatelessWidget {
             Text(dateStr,
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.5),
-                  fontSize: size * 0.03,
+                  fontSize: size * 0.045,
                 )),
           ],
         ),
