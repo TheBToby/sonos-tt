@@ -157,21 +157,21 @@ class AnalogPainter extends CustomPainter {
       );
     }
 
-    // Numbers at 12, 3, 6, 9 positions — increased size + Montserrat font
+    // Numbers at 12, 3, 6, 9 positions — larger, closer to edge
     final numbers = ['12', '3', '6', '9'];
-    final numR = r - 55;
+    final numR = r - 35;
     for (var i = 0; i < 4; i++) {
       final deg = i * 90 - 90;
       final rad = deg * math.pi / 180;
       final x = cx + numR * math.cos(rad);
       final y = cy + numR * math.sin(rad);
-      _drawText(canvas, numbers[i], x, y, r * 0.12, Colors.white.withValues(alpha: 0.9));
+      _drawText(canvas, numbers[i], x, y, r * 0.16, Colors.white.withValues(alpha: 0.9));
     }
 
-    // Hour hand — doubled width
-    _drawHand(canvas, cx, cy, hourAngle, r * 0.48, 10, Colors.white);
-    // Minute hand — doubled width
-    _drawHand(canvas, cx, cy, minAngle, r * 0.68, 6, Colors.white);
+    // Hour hand — increased width
+    _drawHand(canvas, cx, cy, hourAngle, r * 0.48, 14, Colors.white);
+    // Minute hand — increased width
+    _drawHand(canvas, cx, cy, minAngle, r * 0.68, 9, Colors.white);
     // Second hand — doubled width
     _drawHand(canvas, cx, cy, secAngle, r * 0.78, 3.0, const Color(0xFF4fc3f7));
     // Second tail — doubled width
@@ -254,13 +254,18 @@ class DigitalClock extends StatelessWidget {
                       fontFamily: 'Orbitron',
                     )),
                 const SizedBox(width: 8),
-                Text(s,
-                    style: TextStyle(
-                      color: const Color(0xFF4fc3f7),
-                      fontSize: size * 0.072,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'Orbitron',
-                    )),
+                // Fixed-width container so seconds don't shift the layout
+                SizedBox(
+                  width: size * 0.09,
+                  child: Text(s,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: const Color(0xFF4fc3f7),
+                        fontSize: size * 0.072,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: 'Orbitron',
+                      )),
+                ),
               ],
             ),
             SizedBox(height: size * 0.01),
