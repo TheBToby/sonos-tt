@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
@@ -14,53 +15,55 @@ class TurntableLayer extends StatefulWidget {
   State<TurntableLayer> createState() => _TurntableLayerState();
 }
 
-class _TurntableLayerState extends State<TurntableLayer> {
+class _TurntableLayerState extends State<TurntableLayer> with SingleTickerProviderStateMixin {
   DateTime? _lastTap;
   Offset? _dragStart;
   double _rotation = 0;
   double _currentSpeed = 0;
-  DateTime? _lastFrame;
-  Timer? _animTimer;
+  late final Ticker _ticker;
+  Duration? _lastElapsed;
 
   static const _accelDuration = 1.5; // seconds
 
   @override
   void initState() {
     super.initState();
-    _startAnim();
+    _ticker = Ticker(_onTick);
+    _ticker.start();
   }
 
   @override
   void dispose() {
-    _animTimer?.cancel();
+    _ticker.dispose();
     super.dispose();
   }
 
-  void _startAnim() {
-    _lastFrame = DateTime.now();
-    _animTimer?.cancel();
-    _animTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
-      if (!mounted) return;
-      final state = context.read<AppState>();
-      final spinSec = state.config.ui.turntable.spinDuration;
-      final maxSpeed = 360.0 / spinSec;
-      final target = state.sonos.activePlayback.isPlaying ? maxSpeed : 0.0;
-      final rate = maxSpeed / _accelDuration;
-      final now = DateTime.now();
-      final dt = now.difference(_lastFrame!).inMilliseconds / 1000.0;
-      _lastFrame = now;
-      if (_currentSpeed < target) {
-        _currentSpeed =
-            (target - _currentSpeed).abs() < rate * dt ? target : _currentSpeed + rate * dt;
-      } else if (_currentSpeed > target) {
-        _currentSpeed =
-            (target - _currentSpeed).abs() < rate * dt ? target : _currentSpeed - rate * dt;
-      } else {
-        // already at target
-      }
-      _rotation = (_rotation + _currentSpeed * dt) % 360;
-      setState(() {});
-    });
+  /// Called on every vsync-aligned frame by the [Ticker].
+  ///
+  /// Unlike [Timer.periodic], a [Ticker] fires in sync with the display's
+  /// refresh rate, eliminating frame timing jitter that caused the visible
+  /// stuttering of the rotating artwork.
+  void _onTick(Duration elapsed) {
+    if (!mounted) return;
+    // Ticker provides cumulative time since start; compute delta between frames
+    final dt = _lastElapsed == null
+        ? elapsed.inMicroseconds / 1000000.0
+        : (elapsed - _lastElapsed!).inMicroseconds / 1000000.0;
+    _lastElapsed = elapsed;
+    final state = context.read<AppState>();
+    final spinSec = state.config.ui.turntable.spinDuration;
+    final maxSpeed = 360.0 / spinSec;
+    final target = state.sonos.activePlayback.isPlaying ? maxSpeed : 0.0;
+    final rate = maxSpeed / _accelDuration;
+    if (_currentSpeed < target) {
+      _currentSpeed =
+          (target - _currentSpeed).abs() < rate * dt ? target : _currentSpeed + rate * dt;
+    } else if (_currentSpeed > target) {
+      _currentSpeed =
+          (target - _currentSpeed).abs() < rate * dt ? target : _currentSpeed - rate * dt;
+    }
+    _rotation = (_rotation + _currentSpeed * dt) % 360;
+    setState(() {});
   }
 
   Timer? _doubleTapTimer;
