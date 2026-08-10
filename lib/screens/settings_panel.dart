@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../app_theme.dart';
 import '../models/app_config.dart';
+import '../services/home_assistant_service.dart';
 
 class SettingsPanel extends StatefulWidget {
   final double size;
@@ -24,6 +25,18 @@ class _SettingsPanelState extends State<SettingsPanel> {
   late bool _hwDimming;
   late double _spinDuration;
 
+  // Home Assistant backlight settings
+  late bool _haEnabled;
+  late TextEditingController _haUrlController;
+  late TextEditingController _haTokenController;
+  late TextEditingController _haEntityController;
+
+  /// Result of the last "Test connection" run: `null` = not run yet.
+  /// Holds the human-readable message and whether it succeeded.
+  String? _haTestMessage;
+  bool _haTestSuccess = false;
+  bool _haTesting = false;
+
   @override
   void initState() {
     super.initState();
@@ -37,11 +50,18 @@ class _SettingsPanelState extends State<SettingsPanel> {
     _ssBrightness = cfg.ui.screensaver.brightness;
     _hwDimming = cfg.ui.screensaver.hardwareDimming;
     _spinDuration = cfg.ui.turntable.spinDuration.toDouble();
+    _haEnabled = cfg.ui.screensaver.haBacklightEnabled;
+    _haUrlController = TextEditingController(text: cfg.ui.screensaver.haUrl);
+    _haTokenController = TextEditingController(text: cfg.ui.screensaver.haToken);
+    _haEntityController = TextEditingController(text: cfg.ui.screensaver.haEntityId);
   }
 
   @override
   void dispose() {
     _urlController.dispose();
+    _haUrlController.dispose();
+    _haTokenController.dispose();
+    _haEntityController.dispose();
     super.dispose();
   }
 
@@ -171,6 +191,107 @@ class _SettingsPanelState extends State<SettingsPanel> {
               (v) => setState(() => _ssBrightness = v)),
           _switchRow(c, s, state.t('settings.screensaver.hardware_dimming'), _hwDimming,
               (v) => setState(() => _hwDimming = v)),
+          // Home Assistant backlight link
+          _switchRow(c, s, state.t('settings.screensaver.ha_backlight'), _haEnabled,
+              (v) => setState(() => _haEnabled = v)),
+          if (_haEnabled) ...[
+            _settingRow(
+                c, s, state.t('settings.screensaver.ha_url'), _haTextField(_haUrlController, c, s)),
+            _settingRow(c, s, state.t('settings.screensaver.ha_entity'),
+                _haTextField(_haEntityController, c, s, hint: 'light.living_room')),
+            _settingRow(c, s, state.t('settings.screensaver.ha_token'),
+                _haTextField(_haTokenController, c, s, obscure: true)),
+            Padding(
+              padding: EdgeInsets.symmetric(vertical: s * 0.008),
+              child: Row(
+                children: [
+                  SizedBox(width: s * 0.24),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      GestureDetector(
+                        onTap: _haTesting ? null : _testHaConnection,
+                        child: Container(
+                          padding: EdgeInsets.symmetric(horizontal: s * 0.02, vertical: s * 0.014),
+                          decoration: BoxDecoration(
+                            color: c.accent.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(_haTesting ? Icons.hourglass_top : Icons.electrical_services,
+                                  size: s * 0.026, color: c.accent),
+                              SizedBox(width: s * 0.01),
+                              Flexible(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    _haTesting
+                                        ? state.t('settings.screensaver.ha_testing')
+                                        : state.t('settings.screensaver.ha_test'),
+                                    style: TextStyle(color: c.accent, fontSize: s * 0.024),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (_haTestMessage != null)
+                        Padding(
+                          padding: EdgeInsets.only(top: s * 0.008),
+                          child: Text(
+                            _haTestMessage!,
+                            style: TextStyle(
+                              color: _haTestSuccess ? c.success : c.danger,
+                              fontSize: s * 0.02,
+                            ),
+                          ),
+                        ),
+                      // Live connection status of the persistent subscription
+                      if (state.haBacklightActive) ...[
+                        Padding(
+                          padding: EdgeInsets.only(top: s * 0.006),
+                          child: Row(
+                            children: [
+                              Icon(
+                                state.haConnected ? Icons.cloud_done : Icons.cloud_off,
+                                size: s * 0.022,
+                                color: state.haConnected ? c.success : c.warning,
+                              ),
+                              SizedBox(width: s * 0.006),
+                              Text(
+                                state.haConnected
+                                    ? state.t('settings.screensaver.ha_connected')
+                                    : state.t('settings.screensaver.ha_disconnected'),
+                                style: TextStyle(
+                                  color: state.haConnected ? c.success : c.warning,
+                                  fontSize: s * 0.02,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Live entity state (updates in real-time from the
+                        // persistent WebSocket subscription).
+                        if (state.haConnected && state.haLightState != null)
+                          Padding(
+                            padding: EdgeInsets.only(top: s * 0.004),
+                            child: Text(
+                              HomeAssistantService.describeState(state.haLightState),
+                              style: TextStyle(
+                                color: c.textDim,
+                                fontSize: s * 0.018,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ]),
+                  ),
+                ],
+              ),
+            ),
+          ],
           _divider(c, s),
           // Turntable
           _sectionTitle(c, s, state.t('settings.turntable')),
@@ -247,6 +368,61 @@ class _SettingsPanelState extends State<SettingsPanel> {
     );
   }
 
+  Future<void> _testHaConnection() async {
+    final state = context.read<AppState>();
+    setState(() {
+      _haTesting = true;
+      _haTestMessage = null;
+    });
+    try {
+      final result = await state.testHaConnection(
+        url: _haUrlController.text.trim(),
+        token: _haTokenController.text.trim(),
+        entityId: _haEntityController.text.trim(),
+      );
+      if (mounted) {
+        setState(() {
+          _haTesting = false;
+          _haTestSuccess = result.success;
+          _haTestMessage = result.message;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _haTesting = false;
+          _haTestSuccess = false;
+          _haTestMessage = e.toString();
+        });
+      }
+    }
+  }
+
+  TextField _haTextField(
+    TextEditingController controller,
+    SonosColors c,
+    double s, {
+    bool obscure = false,
+    String? hint,
+  }) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      style: TextStyle(color: c.text, fontSize: s * 0.024),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hint,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        filled: true,
+        fillColor: c.surface2,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+
   void _save() {
     final state = context.read<AppState>();
     state.updateConfig(AppConfig(
@@ -262,6 +438,10 @@ class _SettingsPanelState extends State<SettingsPanel> {
           mode: _ssMode,
           brightness: _ssBrightness,
           hardwareDimming: _hwDimming,
+          haBacklightEnabled: _haEnabled,
+          haUrl: _haUrlController.text.trim(),
+          haToken: _haTokenController.text.trim(),
+          haEntityId: _haEntityController.text.trim(),
         ),
         turntable: TurntableConfig(
           spinDuration: _spinDuration.round(),

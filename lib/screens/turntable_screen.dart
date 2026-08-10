@@ -90,7 +90,9 @@ class _TurntableLayerState extends State<TurntableLayer> {
         onPanStart: _handlePanStart,
         onPanEnd: (d) => _handlePanEnd(d, screenSize),
         child: Container(
-          color: c.bg,
+          // Always black so the circular bezel/frame never shows a theme-colored
+          // (e.g. white) ring around the disc on the Raspberry Pi display.
+          color: Colors.black,
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -114,6 +116,7 @@ class _TurntableLayerState extends State<TurntableLayer> {
                 spinDuration: state.config.ui.turntable.spinDuration.toDouble(),
                 size: size,
                 bgIconColor: c.textDim,
+                navVisible: state.navVisible,
               ),
 
               // ──────────────────────────────────────────────────────────────
@@ -161,8 +164,9 @@ class _TurntableLayerState extends State<TurntableLayer> {
                       ),
                     ),
 
-                    // Speaker name at top — moved up 5% for vertical balance
-                    if (state.sonos.activeSpeaker?.name.isNotEmpty ?? false)
+                    // Speaker name at top — moved up 5% for vertical balance.
+                    // Hidden while the nav overlay is active to reduce clutter.
+                    if ((state.sonos.activeSpeaker?.name.isNotEmpty ?? false) && !state.navVisible)
                       Positioned(
                         top: size * 0.20,
                         left: 0,
@@ -184,42 +188,44 @@ class _TurntableLayerState extends State<TurntableLayer> {
                         ),
                       ),
 
-                    // Track info at bottom — symmetric with speaker bar
-                    Positioned(
-                      bottom: size * 0.17,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        padding: EdgeInsets.symmetric(vertical: size * 0.01),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              pb.title.isNotEmpty ? pb.title : '—',
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: c.text,
-                                fontSize: size * 0.038,
-                                fontWeight: FontWeight.w600,
+                    // Track info at bottom — symmetric with speaker bar.
+                    // Hidden while the nav overlay is active to reduce clutter.
+                    if (!state.navVisible)
+                      Positioned(
+                        bottom: size * 0.17,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          color: Colors.white.withValues(alpha: 0.7),
+                          padding: EdgeInsets.symmetric(vertical: size * 0.01),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                pb.title.isNotEmpty ? pb.title : '—',
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: c.text,
+                                  fontSize: size * 0.038,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
-                            Text(
-                              pb.artist.isNotEmpty ? pb.artist : '—',
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: c.textDim,
-                                fontSize: size * 0.025,
+                              Text(
+                                pb.artist.isNotEmpty ? pb.artist : '—',
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: c.textDim,
+                                  fontSize: size * 0.025,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
 
                     // Connection indicator dot
                     Positioned(
@@ -369,6 +375,7 @@ class _TurntableDisc extends StatefulWidget {
   final double spinDuration; // seconds for full 360° rotation
   final double size;
   final Color bgIconColor;
+  final bool navVisible;
 
   const _TurntableDisc({
     required this.artworkUrl,
@@ -377,6 +384,7 @@ class _TurntableDisc extends StatefulWidget {
     required this.spinDuration,
     required this.size,
     required this.bgIconColor,
+    required this.navVisible,
   });
 
   @override
@@ -397,6 +405,11 @@ class _TurntableDiscState extends State<_TurntableDisc> with SingleTickerProvide
 
   /// Resolved artwork image (pre-scaled to display size for GPU efficiency).
   ui.Image? _artworkImage;
+
+  /// Pre-blurred copy of [_artworkImage], generated once per track so the nav
+  /// overlay can rotate a cached blurred image instead of blurring per frame
+  /// (which caused heavy stuttering on the Raspberry Pi).
+  ui.Image? _blurredArtworkImage;
   ImageStream? _imageStream;
   ImageStreamListener? _imageListener;
 
@@ -426,6 +439,13 @@ class _TurntableDiscState extends State<_TurntableDisc> with SingleTickerProvide
 
   void _loadArtwork() {
     _cancelImageLoad();
+
+    // Invalidate the cached blurred image from the previous track.
+    final oldBlurred = _blurredArtworkImage;
+    _blurredArtworkImage = null;
+    if (oldBlurred != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => oldBlurred.dispose());
+    }
 
     if (widget.artworkUrl.isEmpty) {
       // No artwork — clear image and rebuild to show fallback icon
@@ -461,12 +481,44 @@ class _TurntableDiscState extends State<_TurntableDisc> with SingleTickerProvide
             oldImage.dispose();
           });
         }
+        // Pre-generate a blurred copy for the nav overlay (see
+        // _generateBlurredImage). Done once per track so the nav menu can
+        // rotate a cached blurred image instead of running BackdropFilter.
+        _generateBlurredImage(newImage);
       }
     }, onError: (error, stack) {
       debugPrint('Error loading artwork: $error');
     });
 
     stream.addListener(_imageListener!);
+  }
+
+  /// Bakes a blurred version of [source] into a new [ui.Image], computed once.
+  /// The nav overlay rotates this cached image instead of blurring per frame.
+  void _generateBlurredImage(ui.Image source) {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final w = source.width.toDouble();
+    final h = source.height.toDouble();
+    final bounds = Rect.fromLTWH(0, 0, w, h);
+    canvas.saveLayer(
+      bounds,
+      Paint()..imageFilter = ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+    );
+    canvas.drawImageRect(source, bounds, bounds, Paint());
+    canvas.restore();
+    final picture = recorder.endRecording();
+    picture.toImage(source.width, source.height).then((blurred) {
+      if (!mounted || _artworkImage != source) {
+        // Widget disposed, or a newer artwork loaded while generating.
+        blurred.dispose();
+        return;
+      }
+      _blurredArtworkImage = blurred;
+      setState(() {});
+    }).catchError((Object e) {
+      debugPrint('Error generating blurred artwork: $e');
+    });
   }
 
   void _onTick(Duration elapsed) {
@@ -498,6 +550,7 @@ class _TurntableDiscState extends State<_TurntableDisc> with SingleTickerProvide
     _ticker.dispose();
     _cancelImageLoad();
     _artworkImage?.dispose();
+    _blurredArtworkImage?.dispose();
     _rotationNotifier.dispose();
     super.dispose();
   }
@@ -509,6 +562,8 @@ class _TurntableDiscState extends State<_TurntableDisc> with SingleTickerProvide
         size: Size(widget.size, widget.size),
         painter: TurntableDiscPainter(
           image: _artworkImage,
+          blurredImage: _blurredArtworkImage,
+          navVisible: widget.navVisible,
           rotationListenable: _rotationNotifier,
           bgIconColor: widget.bgIconColor,
           iconSize: widget.size * 0.15,
@@ -524,12 +579,16 @@ class _TurntableDiscState extends State<_TurntableDisc> with SingleTickerProvide
 
 class TurntableDiscPainter extends CustomPainter {
   final ui.Image? image;
+  final ui.Image? blurredImage;
+  final bool navVisible;
   final ValueListenable<double> rotationListenable;
   final Color bgIconColor;
   final double iconSize;
 
   TurntableDiscPainter({
     required this.image,
+    required this.blurredImage,
+    required this.navVisible,
     required this.rotationListenable,
     required this.bgIconColor,
     required this.iconSize,
@@ -554,8 +613,14 @@ class TurntableDiscPainter extends CustomPainter {
       Paint()..color = const Color(0xFF1a1a1a),
     );
 
+    // Choose artwork: a pre-blurred image (cached once per track) when the nav
+    // overlay is active, otherwise the sharp image. Rotating a cached blurred
+    // image is far cheaper than running a BackdropFilter every frame.
+    final useBlurred = navVisible && blurredImage != null;
+    final drawImage = useBlurred ? blurredImage! : image;
+
     // Draw rotated artwork
-    if (image != null) {
+    if (drawImage != null) {
       canvas.save();
       canvas.translate(center.dx, center.dy);
       // Read the current rotation value at paint time — always up-to-date
@@ -566,8 +631,8 @@ class TurntableDiscPainter extends CustomPainter {
       final src = Rect.fromLTWH(
         0,
         0,
-        image!.width.toDouble(),
-        image!.height.toDouble(),
+        drawImage.width.toDouble(),
+        drawImage.height.toDouble(),
       );
       final dst = Rect.fromCenter(
         center: Offset.zero,
@@ -575,7 +640,7 @@ class TurntableDiscPainter extends CustomPainter {
         height: size.height,
       );
       canvas.drawImageRect(
-        image!,
+        drawImage,
         src,
         dst,
         Paint()
@@ -619,5 +684,9 @@ class TurntableDiscPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant TurntableDiscPainter old) =>
-      image != old.image || bgIconColor != old.bgIconColor || iconSize != old.iconSize;
+      image != old.image ||
+      blurredImage != old.blurredImage ||
+      navVisible != old.navVisible ||
+      bgIconColor != old.bgIconColor ||
+      iconSize != old.iconSize;
 }

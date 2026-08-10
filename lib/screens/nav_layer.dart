@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -102,14 +101,14 @@ class NavLayer extends StatelessWidget {
           height: size,
           child: Stack(
             children: [
-              // Blur + darken backdrop when nav is visible
+              // Darken backdrop when nav is visible. The blurred artwork itself
+              // is now rendered by the rotating disc (a cached blurred image)
+              // instead of a per-frame BackdropFilter, which caused heavy
+              // stuttering on the Raspberry Pi.
               if (navVisible)
                 Positioned.fill(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                    child: Container(
-                      color: c.scrim.withValues(alpha: 0.3),
-                    ),
+                  child: Container(
+                    color: c.scrim.withValues(alpha: 0.3),
                   ),
                 ),
               // Radial nav UI
@@ -188,7 +187,8 @@ class RadialNavPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Scrim background (additional darkening on top of the BackdropFilter blur)
+    // Scrim background (additional darkening over the blurred disc rendered by
+    // the TurntableLayer).
     if (navVisible) {
       canvas.drawCircle(
         Offset(cx, cy),

@@ -6,6 +6,7 @@ import 'repositories/sonos_repository.dart';
 import 'services/artwork_cache.dart';
 import 'services/backlight_service.dart';
 import 'services/config_service.dart';
+import 'services/home_assistant_service.dart';
 import 'services/sonos_event_service.dart';
 
 /// View enum matching the Svelte $view store.
@@ -16,7 +17,25 @@ class AppState extends ChangeNotifier {
   final ConfigService configService = ConfigService();
   final ArtworkCache artworkCache = ArtworkCache();
   final BacklightService backlight = BacklightService();
+  HomeAssistantService? _haService;
   SonosEventService? _eventService;
+
+  /// Latest known state of the configured Home Assistant light entity.
+  HaLightState? _haLightState;
+  HaLightState? get haLightState => _haLightState;
+
+  /// Whether the persistent HA subscription is currently connected.
+  bool _haConnected = false;
+  bool get haConnected => _haConnected;
+
+  /// Whether the HA backlight feature is enabled in config and a subscription
+  /// is active (regardless of whether it's currently connected).
+  bool get haBacklightActive =>
+      _config.ui.screensaver.haBacklightEnabled &&
+      _config.ui.screensaver.haUrl.isNotEmpty &&
+      _config.ui.screensaver.haToken.isNotEmpty &&
+      _config.ui.screensaver.haEntityId.isNotEmpty &&
+      _haService != null;
 
   AppConfig _config = const AppConfig();
   AppConfig get config => _config;
@@ -62,8 +81,79 @@ class AppState extends ChangeNotifier {
     await backlight.init();
     _startPolling();
     _startEventService();
+    _startHomeAssistant();
     _initialized = true;
     notifyListeners();
+  }
+
+  /// Start (or restart) the Home Assistant subscription based on the current
+  /// screensaver config. Safe to call repeatedly; it tears down any existing
+  /// connection before reconnecting.
+  void _startHomeAssistant() {
+    final ss = _config.ui.screensaver;
+    if (!ss.haBacklightEnabled || ss.haUrl.isEmpty || ss.haToken.isEmpty || ss.haEntityId.isEmpty) {
+      _stopHomeAssistant();
+      return;
+    }
+
+    _haService ??= HomeAssistantService(
+      onState: _onHaState,
+      onConnectionChange: _onHaConnectionChange,
+    );
+    _haService!.connect(ss.haUrl, ss.haToken, ss.haEntityId);
+  }
+
+  void _stopHomeAssistant() {
+    _haService?.dispose();
+    _haService = null;
+    _haLightState = null;
+    _haConnected = false;
+  }
+
+  /// New light state from Home Assistant. While the screensaver is active,
+  /// drive the backlight from this state; otherwise just cache it.
+  /// Always notify listeners so the settings panel can display the live state.
+  void _onHaState(HaLightState state) {
+    _haLightState = state;
+    if (_view == AppView.screensaver) {
+      _applyHaBacklight(state);
+    }
+    notifyListeners();
+  }
+
+  /// HA connection state changed. While in the screensaver, fall back to
+  /// standard hardware dimming if the connection drops.
+  void _onHaConnectionChange(bool connected) {
+    final changed = _haConnected != connected;
+    _haConnected = connected;
+    if (changed && _view == AppView.screensaver) {
+      if (!connected) {
+        // Connection lost — fall back to standard dimming.
+        print('[ha-backlight] Connection lost during screensaver — falling back to dim()');
+        backlight.dim();
+      } else if (_haLightState != null) {
+        // Reconnected — apply the latest known entity state.
+        print('[ha-backlight] Reconnected during screensaver — applying HA state');
+        _applyHaBacklight(_haLightState!);
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Apply an HA light state to the physical backlight during screensaver.
+  ///
+  /// - Light off → backlight fully off (0%).
+  /// - Light on  → backlight brightness aligned to the entity's brightness
+  ///   (0–255 mapped to 0–100%). If the entity has no brightness attribute,
+  ///   fall back to the standard dim level.
+  void _applyHaBacklight(HaLightState state) {
+    if (!state.on) {
+      backlight.off();
+    } else if (state.brightness == null) {
+      backlight.dim();
+    } else {
+      backlight.setBrightness(state.brightnessPercent);
+    }
   }
 
   void _startEventService() {
@@ -261,11 +351,29 @@ class AppState extends ChangeNotifier {
   void setView(AppView v) {
     if (_view == v) return;
 
-    // Hardware backlight dimming: dim when entering screensaver, restore on wake.
-    if (_config.ui.screensaver.hardwareDimming) {
-      if (v == AppView.screensaver) {
+    // Backlight handling on screensaver enter/exit.
+    if (v == AppView.screensaver) {
+      // Entering screensaver.
+      final ss = _config.ui.screensaver;
+      if (ss.haBacklightEnabled && _haConnected) {
+        // HA-linked backlight: drive from the latest known entity state.
+        final state = _haLightState;
+        if (state != null) {
+          _applyHaBacklight(state);
+        } else {
+          // No state yet — dim as fallback until the first update arrives.
+          backlight.dim();
+        }
+      } else if (ss.haBacklightEnabled || ss.hardwareDimming) {
+        // HA enabled but not connected (or standard hardware dimming):
+        // fall back to standard dim level.
         backlight.dim();
-      } else if (_view == AppView.screensaver) {
+      }
+    } else if (_view == AppView.screensaver) {
+      // Leaving screensaver — restore full brightness if we touched the
+      // backlight (either via HA or standard hardware dimming).
+      final ss = _config.ui.screensaver;
+      if (ss.haBacklightEnabled || ss.hardwareDimming) {
         backlight.restore();
       }
     }
@@ -490,13 +598,42 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> updateConfig(AppConfig newConfig) async {
+    final oldHa = _config.ui.screensaver;
+    final newHa = newConfig.ui.screensaver;
     _config = newConfig;
     await configService.saveConfig(newConfig);
     api.resetRareDataCache();
     if (!api.isMock(newConfig.socoApi.baseUrl)) {
       api.retryRealConnection();
     }
+    // (Re)start the HA subscription if the HA-related config changed.
+    final haChanged = oldHa.haBacklightEnabled != newHa.haBacklightEnabled ||
+        oldHa.haUrl != newHa.haUrl ||
+        oldHa.haToken != newHa.haToken ||
+        oldHa.haEntityId != newHa.haEntityId;
+    if (haChanged) {
+      _startHomeAssistant();
+    }
     notifyListeners();
+  }
+
+  /// Test the Home Assistant connection with the provided credentials.
+  /// Used by the settings dialog. Does NOT affect the persistent subscription.
+  Future<HaConnectionResult> testHaConnection({
+    required String url,
+    required String token,
+    required String entityId,
+  }) async {
+    final svc = HomeAssistantService();
+    try {
+      return await svc.testConnection(
+        httpBaseUrl: url,
+        token: token,
+        entityId: entityId,
+      );
+    } finally {
+      svc.dispose();
+    }
   }
 
   Future<void> resetConfig() async {
@@ -534,6 +671,14 @@ class AppState extends ChangeNotifier {
       'settings.screensaver.mode': 'Uhr-Modus',
       'settings.screensaver.brightness': 'Helligkeit',
       'settings.screensaver.hardware_dimming': 'Hardware-Dimming',
+      'settings.screensaver.ha_backlight': 'Home Assistant Backlight',
+      'settings.screensaver.ha_url': 'Home Assistant URL',
+      'settings.screensaver.ha_token': 'Zugriffstoken',
+      'settings.screensaver.ha_entity': 'Entität',
+      'settings.screensaver.ha_test': 'Verbindung testen',
+      'settings.screensaver.ha_testing': 'Teste…',
+      'settings.screensaver.ha_connected': 'Verbunden',
+      'settings.screensaver.ha_disconnected': 'Getrennt',
       'settings.turntable': 'Plattenspieler',
       'settings.turntable.spin': 'Umlaufzeit (Sek.)',
       'settings.api': 'SoCo-CLI API',
@@ -569,6 +714,14 @@ class AppState extends ChangeNotifier {
       'settings.screensaver.mode': 'Clock mode',
       'settings.screensaver.brightness': 'Brightness',
       'settings.screensaver.hardware_dimming': 'Hardware Dimming',
+      'settings.screensaver.ha_backlight': 'Home Assistant Backlight',
+      'settings.screensaver.ha_url': 'Home Assistant URL',
+      'settings.screensaver.ha_token': 'Access Token',
+      'settings.screensaver.ha_entity': 'Entity',
+      'settings.screensaver.ha_test': 'Test Connection',
+      'settings.screensaver.ha_testing': 'Testing…',
+      'settings.screensaver.ha_connected': 'Connected',
+      'settings.screensaver.ha_disconnected': 'Disconnected',
       'settings.turntable': 'Turntable',
       'settings.turntable.spin': 'Spin duration (sec)',
       'settings.api': 'SoCo-CLI API',
@@ -585,9 +738,12 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _eventService?.dispose();
+    _haService?.dispose();
+    _haService = null;
     api.stopPolling();
     // Restore backlight to full brightness on app exit.
     backlight.restore();
+    backlight.dispose();
     super.dispose();
   }
 }

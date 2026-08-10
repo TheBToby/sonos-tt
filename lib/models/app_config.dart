@@ -28,12 +28,24 @@ class ScreensaverConfig {
   final double brightness; // 0..1
   final bool hardwareDimming; // dim physical backlight via USB
 
+  /// Link the display backlight during screensaver to a Home Assistant
+  /// light entity. When enabled, the HA entity's on/off and brightness
+  /// drive the physical backlight instead of the fixed hardware dim level.
+  final bool haBacklightEnabled;
+  final String haUrl; // e.g. http://homeassistant.local:8123
+  final String haToken; // long-lived access token
+  final String haEntityId; // e.g. light.living_room
+
   const ScreensaverConfig({
     this.enabled = true,
     this.timeout = 30,
     this.mode = 'analog',
     this.brightness = 0.18,
     this.hardwareDimming = false,
+    this.haBacklightEnabled = false,
+    this.haUrl = '',
+    this.haToken = '',
+    this.haEntityId = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -42,6 +54,10 @@ class ScreensaverConfig {
         'mode': mode,
         'brightness': brightness,
         'hardwareDimming': hardwareDimming,
+        'haBacklightEnabled': haBacklightEnabled,
+        'haUrl': haUrl,
+        'haToken': haToken,
+        'haEntityId': haEntityId,
       };
 
   factory ScreensaverConfig.fromJson(Map<String, dynamic> json) => ScreensaverConfig(
@@ -50,6 +66,33 @@ class ScreensaverConfig {
         mode: json['mode'] as String? ?? 'analog',
         brightness: (json['brightness'] as num?)?.toDouble() ?? 0.18,
         hardwareDimming: json['hardwareDimming'] as bool? ?? false,
+        haBacklightEnabled: json['haBacklightEnabled'] as bool? ?? false,
+        haUrl: json['haUrl'] as String? ?? '',
+        haToken: json['haToken'] as String? ?? '',
+        haEntityId: json['haEntityId'] as String? ?? '',
+      );
+
+  ScreensaverConfig copyWith({
+    bool? enabled,
+    int? timeout,
+    String? mode,
+    double? brightness,
+    bool? hardwareDimming,
+    bool? haBacklightEnabled,
+    String? haUrl,
+    String? haToken,
+    String? haEntityId,
+  }) =>
+      ScreensaverConfig(
+        enabled: enabled ?? this.enabled,
+        timeout: timeout ?? this.timeout,
+        mode: mode ?? this.mode,
+        brightness: brightness ?? this.brightness,
+        hardwareDimming: hardwareDimming ?? this.hardwareDimming,
+        haBacklightEnabled: haBacklightEnabled ?? this.haBacklightEnabled,
+        haUrl: haUrl ?? this.haUrl,
+        haToken: haToken ?? this.haToken,
+        haEntityId: haEntityId ?? this.haEntityId,
       );
 }
 

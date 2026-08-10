@@ -119,7 +119,12 @@ class _CircularShellState extends State<CircularShell> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size.shortestSide;
+    // Force the area outside the circular display to be black so the
+    // anti-aliased edge of ClipOval never blends with a theme-colored
+    // (e.g. white) background, which showed up as a thin ring on the
+    // Raspberry Pi display.
     return Scaffold(
+      backgroundColor: Colors.black,
       body: Center(
         child: SizedBox(
           width: size,

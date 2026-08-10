@@ -32,11 +32,19 @@ class _ScreensaverLayerState extends State<ScreensaverLayer> {
 
   @override
   Widget build(BuildContext context) {
-    final view = context.watch<AppState>().view;
+    final appState = context.watch<AppState>();
+    final view = appState.view;
     if (view != AppView.screensaver) return const SizedBox.shrink();
 
-    final cfg = context.watch<AppState>().config.ui.screensaver;
+    final cfg = appState.config.ui.screensaver;
     final size = MediaQuery.of(context).size.shortestSide;
+
+    // When HA backlight is linked and connected, the physical backlight is the
+    // sole brightness control — neutralize the software color-matrix so the
+    // clock isn't doubly dimmed (matrix * physical). Fall back to the
+    // configured software brightness when HA is disabled or disconnected.
+    final haActive = cfg.haBacklightEnabled && appState.haConnected;
+    final matrixBrightness = haActive ? 1.0 : cfg.brightness;
 
     return AnimatedOpacity(
       opacity: 1.0,
@@ -47,19 +55,19 @@ class _ScreensaverLayerState extends State<ScreensaverLayer> {
         color: Colors.black,
         child: ColorFiltered(
           colorFilter: ColorFilter.matrix([
-            cfg.brightness,
+            matrixBrightness,
             0,
             0,
             0,
             0,
             0,
-            cfg.brightness,
+            matrixBrightness,
             0,
             0,
             0,
             0,
             0,
-            cfg.brightness,
+            matrixBrightness,
             0,
             0,
             0,

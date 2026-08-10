@@ -145,25 +145,39 @@ for f in sonos-tt-flutter.service soco-cli.service soco-discover.service soco-di
   fi
 done
 
+# Copy Home Assistant secrets file if it exists (gitignored, contains tokens).
+# This allows deploying HA credentials without entering them in the app UI.
+if [ -f "$SCRIPT_DIR/ha-secrets.json" ]; then
+  echo "→ Deploying Home Assistant secrets..."
+  rsync -avz \
+    -e "$SSH_RSYNC_E" \
+    "$SCRIPT_DIR/ha-secrets.json" "$PI_HOST:$DEPLOY_DIR/"
+else
+  echo "ℹ️  No ha-secrets.json found (see ha-secrets.example.json). Skipping."
+fi
+
 # Install backlight udev rule + pyusb if the brightness script is present.
 # This enables hardware backlight dimming for Waveshare displays.
+# All paths are defined as LOCAL variables and expanded BEFORE being passed
+# to ssh — the remote shell only sees literal paths, no variables.
 if ssh "${SSH_CTL[@]}" "$PI_HOST" "test -f '$DEPLOY_DIR/brightness.py'" 2>/dev/null; then
   echo "→ Setting up hardware backlight dimming (Waveshare USB control)..."
-  ssh "${SSH_CTL[@]}" "$PI_HOST" "
-    # Install pyusb if missing (needed by brightness.py)
-    dpkg -s python3-usb >/dev/null 2>&1 || sudo apt install -y python3-usb
-    # Install or update udev rule for non-root USB + hidraw access.
-    # Always compare and update if the deployed version differs — this ensures
-    # the hidraw rule (needed for touchscreen-safe brightness control) is
-    # installed even if the old USB-only rule was already present.
-    UDEV_DST=/etc/udev/rules.d/51-waveshare-backlight.rules
-    if [ ! -f "$UDEV_DST" ] || ! diff -q '$DEPLOY_DIR/51-waveshare-backlight.rules' "$UDEV_DST" >/dev/null 2>&1; then
-      sudo cp '$DEPLOY_DIR/51-waveshare-backlight.rules' "$UDEV_DST"
-      sudo udevadm control --reload-rules
-      sudo udevadm trigger
-      echo '  Backlight udev rule installed/updated (reboot or replug USB to activate).'
-    fi
-  " 2>/dev/null || true
+  local_udev_dst="/etc/udev/rules.d/51-waveshare-backlight.rules"
+  local_src_rule="$DEPLOY_DIR/51-waveshare-backlight.rules"
+
+  # Install pyusb if missing (needed by brightness.py)
+  ssh "${SSH_CTL[@]}" "$PI_HOST" \
+    "dpkg -s python3-usb >/dev/null 2>&1 || sudo apt install -y python3-usb" \
+    2>/dev/null || true
+
+  # Install or update udev rule for non-root USB + hidraw access.
+  # All $-variables expanded locally; remote shell sees only literal paths.
+  # We use --action=add to force udev to re-evaluate rules against existing
+  # devices (plain "udevadm trigger" sometimes doesn't update permissions
+  # for devices that are already bound to a kernel driver).
+  ssh "${SSH_CTL[@]}" "$PI_HOST" \
+    "if [ ! -f '$local_udev_dst' ] || ! diff -q '$local_src_rule' '$local_udev_dst' >/dev/null 2>&1; then sudo cp '$local_src_rule' '$local_udev_dst' && sudo udevadm control --reload-rules && sudo udevadm trigger --action=add --subsystem-match=hidraw --subsystem-match=usb && echo '  Backlight udev rule installed/updated.'; fi" \
+    2>/dev/null || true
 fi
 
 # Ensure the remote user can access DRM/GPU/input devices for manual runs.

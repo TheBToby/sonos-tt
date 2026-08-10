@@ -18,6 +18,8 @@ lib/
     sonos_api.dart     — SoCo-CLI HTTP client + mock provider + parsers
     config_service.dart — SharedPreferences persistence
     artwork_cache.dart  — In-memory artwork image cache
+    home_assistant_service.dart — HA WebSocket API client (light entity)
+    backlight_service.dart — Waveshare USB backlight control
   l10n/
     strings.dart       — German/English string tables
 ```
@@ -433,3 +435,60 @@ that:
 - The udev rule is installed (`ls /etc/udev/rules.d/51-waveshare-backlight.rules`)
 - `python3-usb` is installed (`dpkg -s python3-usb`)
 - The USB device is detected (`lsusb | grep 0712:000a`)
+
+## Home Assistant Backlight Link
+
+Instead of a fixed dim level during the screensaver, the display backlight can
+follow a **Home Assistant light entity**. When the linked light is off, the
+display is turned off entirely; when it's on, the display brightness is aligned
+to the light's brightness (0–255 → 0–100%). This requires the hardware
+backlight support above.
+
+### Setup
+
+**Option A — Secrets file (recommended for the Pi):**
+
+Create `deploy/ha-secrets.json` (gitignored — never committed to GitHub) from
+the template:
+
+```bash
+cp deploy/ha-secrets.example.json deploy/ha-secrets.json
+```
+
+Edit `deploy/ha-secrets.json` with your HA URL, entity ID, and long-lived
+access token, then deploy:
+
+```bash
+./deploy/deploy.sh
+```
+
+The app reads `/opt/sonos-tt/ha-secrets.json` at startup and auto-enables the
+HA backlight link. Values entered in the app UI (Option B) override the
+secrets file.
+
+**Option B — In-app configuration:**
+
+1. In Home Assistant, create a **Long-Lived Access Token** (Profile →
+   Long-Lived Access Tokens → Create Token).
+2. In the app: **Settings → Screensaver → Home Assistant Backlight** → ON.
+3. Enter your HA URL (e.g. `http://homeassistant.local:8123`), the entity ID
+   (e.g. `light.living_room`), and the access token.
+4. Tap **Test Connection** to verify credentials and that the entity exists.
+   The result (success/failure + entity state including brightness) is shown
+   inline.
+5. **Save**. The app opens a persistent WebSocket subscription to HA
+   (`/api/websocket`) and starts driving the backlight whenever the screensaver
+   is active. The live connection state is shown beneath the test button.
+
+### Behavior
+
+| Light state | Display backlight |
+|-------------|-------------------|
+| Off | Fully off (0%) |
+| On, brightness set | Aligned to light brightness (0–255 → 0–100%) |
+| On, no brightness attr. | Standard hardware dim level |
+| Connection lost | Falls back to standard hardware dimming |
+
+When HA is active and connected, the screensaver's software color-matrix is
+neutralized (set to 1.0) so the physical backlight is the sole brightness
+control — preventing double dimming.
