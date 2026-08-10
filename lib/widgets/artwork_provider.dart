@@ -10,11 +10,11 @@ import '../services/artwork_cache.dart';
 /// the decoded image.
 ///
 /// **Critical**: [operator ==] and [hashCode] are defined based on [url]
-/// so that [ImageCache] reuses the same completer across rebuilds. The
-/// turntable animation timer calls `setState` every 16 ms; without these
-/// overrides, a new provider/key would be created each frame, causing the
-/// old completer to be disposed while [ImageCache] still holds a reference
-/// — producing the "Bad state: Stream has been disposed" error.
+/// so that [ImageCache] reuses the same completer across rebuilds. Without
+/// these overrides, a new provider/key would be created on each track
+/// change, causing the old completer to be disposed while [ImageCache]
+/// still holds a reference — producing the "Bad state: Stream has been
+/// disposed" error.
 class ArtworkImageProvider extends ImageProvider<ArtworkImageProvider> {
   final String url;
   final ArtworkCache cache;
