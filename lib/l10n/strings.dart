@@ -51,6 +51,7 @@ const Map<String, Map<String, String>> strings = {
     'settings.screensaver.mode.analog': 'Analog',
     'settings.screensaver.mode.digital': 'Digital',
     'settings.screensaver.brightness': 'Helligkeit',
+    'settings.screensaver.hardware_dimming': 'Hardware-Dimming',
     'settings.screensaver.enabled': 'Aktiviert',
     'settings.turntable': 'Plattenspieler',
     'settings.turntable.spin': 'Umlaufzeit (Sekunden)',
@@ -67,8 +68,7 @@ const Map<String, Map<String, String>> strings = {
     'connection.mock_text':
         'SoCo-CLI Server nicht erreichbar. Bitte starten Sie „soco-cli http-server --host 0.0.0.0 --port 5001" und prüfen Sie die URL in den Einstellungen.',
     'connection.retry': 'Erneut versuchen',
-    'gestures.hint':
-        'Tippen: Play/Pause · Wischen: Titel/Lautstärke · Doppeltipp: Menü',
+    'gestures.hint': 'Tippen: Play/Pause · Wischen: Titel/Lautstärke · Doppeltipp: Menü',
     'screensaver.tap_to_wake': 'Tippen zum Aufwecken',
   },
   'en': {
@@ -109,6 +109,7 @@ const Map<String, Map<String, String>> strings = {
     'settings.screensaver.mode.analog': 'Analog',
     'settings.screensaver.mode.digital': 'Digital',
     'settings.screensaver.brightness': 'Brightness',
+    'settings.screensaver.hardware_dimming': 'Hardware Dimming',
     'settings.screensaver.enabled': 'Enabled',
     'settings.turntable': 'Turntable',
     'settings.turntable.spin': 'Spin duration (seconds)',
@@ -125,8 +126,7 @@ const Map<String, Map<String, String>> strings = {
     'connection.mock_text':
         'SoCo-CLI server unreachable. Please run "soco-cli http-server --host 0.0.0.0 --port 5001" and check the URL in Settings.',
     'connection.retry': 'Retry',
-    'gestures.hint':
-        'Tap: Play/Pause · Swipe: Track/Volume · Double-tap: Menu',
+    'gestures.hint': 'Tap: Play/Pause · Swipe: Track/Volume · Double-tap: Menu',
     'screensaver.tap_to_wake': 'Tap to wake',
   },
 };

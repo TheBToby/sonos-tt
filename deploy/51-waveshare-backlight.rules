@@ -1,0 +1,28 @@
+# Grant all users read/write access to Waveshare display controllers.
+#
+# Waveshare HDMI displays (e.g., 7" Round LCD) expose a USB device that
+# controls the backlight. The Flutter app uses this to dim the screen during
+# the screensaver.
+#
+# Two access methods are used by brightness.py:
+# 1. /dev/hidraw* (preferred) — does NOT detach kernel drivers, so the
+#    touchscreen keeps working. Requires access to the hidraw device node.
+# 2. USB subsystem (fallback) — uses libusb directly. Requires access to
+#    the USB device node.
+#
+# USB VID: 0x0712, PID: 0x000a
+#
+# Installation:
+#   sudo cp 51-waveshare-backlight.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#
+# Then unplug and replug the USB cable (or reboot) for the rule to take effect.
+
+# Grant access to the USB device node (for pyusb fallback)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0712", ATTRS{idProduct}=="000a", MODE="0666"
+
+# Grant access to /dev/hidraw* (preferred method — touchscreen-safe)
+# This allows brightness.py to write brightness commands via hidraw without
+# detaching any kernel drivers.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0712", ATTRS{idProduct}=="000a", MODE="0666"

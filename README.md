@@ -382,3 +382,54 @@ dtparam=i2c_arm=on
 ```
 
 flutter-pi will use the DRM framebuffer directly — no X11 or Wayland needed.
+
+## Hardware Backlight Dimming (Waveshare Displays)
+
+The app can optionally dim the **physical backlight** of Waveshare HDMI displays
+(e.g., 7" Round LCD) during the screensaver, reducing power consumption and
+light emission. This uses the display's USB control interface (not DDC/CI).
+
+### Prerequisites
+
+On the Pi:
+
+```bash
+# Install pyusb (required by the brightness helper script)
+sudo apt install -y python3-usb
+
+# Install the udev rule for non-root USB access
+sudo cp /opt/sonos-tt/51-waveshare-backlight.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+Then **unplug and replug the display's USB cable** (or reboot) for the udev
+rule to take effect.
+
+> **Note:** The deploy script (`deploy/deploy.sh`) handles this automatically
+> on each deploy — installing pyusb and the udev rule if they're missing.
+
+### Enabling in the App
+
+1. Open **Settings** (gear icon in the nav ring)
+2. Under **Screensaver**, toggle **Hardware Dimming** ON
+3. Tap **Save**
+
+When the screensaver activates, the backlight dims to ~10%. Tapping to wake
+restores it to 100%.
+
+### Manual Testing
+
+```bash
+# Test the brightness script directly on the Pi:
+python3 /opt/sonos-tt/brightness.py 50    # 50% brightness
+python3 /opt/sonos-tt/brightness.py 100   # Full brightness
+python3 /opt/sonos-tt/brightness.py 0     # Lowest brightness
+```
+
+If the script runs without errors but the brightness doesn't change, verify
+that:
+- The display's USB cable is connected (not just HDMI)
+- The udev rule is installed (`ls /etc/udev/rules.d/51-waveshare-backlight.rules`)
+- `python3-usb` is installed (`dpkg -s python3-usb`)
+- The USB device is detected (`lsusb | grep 0712:000a`)

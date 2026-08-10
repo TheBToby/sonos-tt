@@ -21,6 +21,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
   late double _ssTimeout;
   late String _ssMode;
   late double _ssBrightness;
+  late bool _hwDimming;
   late double _spinDuration;
 
   @override
@@ -34,6 +35,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     _ssTimeout = cfg.ui.screensaver.timeout.toDouble();
     _ssMode = cfg.ui.screensaver.mode;
     _ssBrightness = cfg.ui.screensaver.brightness;
+    _hwDimming = cfg.ui.screensaver.hardwareDimming;
     _spinDuration = cfg.ui.turntable.spinDuration.toDouble();
   }
 
@@ -167,6 +169,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
               (v) => setState(() => _ssMode = v)),
           _sliderRow(c, s, state.t('settings.screensaver.brightness'), _ssBrightness, 0.05, 1.0,
               (v) => setState(() => _ssBrightness = v)),
+          _switchRow(c, s, state.t('settings.screensaver.hardware_dimming'), _hwDimming,
+              (v) => setState(() => _hwDimming = v)),
           _divider(c, s),
           // Turntable
           _sectionTitle(c, s, state.t('settings.turntable')),
@@ -174,14 +178,17 @@ class _SettingsPanelState extends State<SettingsPanel> {
               (v) => setState(() => _spinDuration = v),
               suffix: 's'),
           const SizedBox(height: 20),
-          // Buttons with Material icons
+          // Buttons with Material icons — proportioned for readability and touch target.
+          // FittedBox auto-scales text to fit, preventing overflow with longer
+          // translated strings (e.g. German "auf Standard zurücksetzen").
           Row(
             children: [
               Expanded(
+                flex: 2,
                 child: GestureDetector(
                   onTap: () => state.resetConfig(),
                   child: Container(
-                    padding: EdgeInsets.symmetric(vertical: s * 0.022),
+                    padding: EdgeInsets.symmetric(vertical: s * 0.025),
                     decoration: BoxDecoration(
                       color: c.surface2,
                       borderRadius: BorderRadius.circular(12),
@@ -189,21 +196,27 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.refresh, size: s * 0.03, color: c.textDim),
-                        SizedBox(width: s * 0.012),
-                        Text(state.t('settings.reset'),
-                            style: TextStyle(color: c.textDim, fontSize: s * 0.028)),
+                        Icon(Icons.refresh, size: s * 0.034, color: c.textDim),
+                        SizedBox(width: s * 0.014),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(state.t('settings.reset'),
+                                style: TextStyle(color: c.textDim, fontSize: s * 0.026)),
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: s * 0.015),
               Expanded(
+                flex: 3,
                 child: GestureDetector(
                   onTap: _save,
                   child: Container(
-                    padding: EdgeInsets.symmetric(vertical: s * 0.022),
+                    padding: EdgeInsets.symmetric(vertical: s * 0.025),
                     decoration: BoxDecoration(
                       color: c.accent,
                       borderRadius: BorderRadius.circular(12),
@@ -211,11 +224,16 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.check, size: s * 0.03, color: c.bg),
-                        SizedBox(width: s * 0.012),
-                        Text(state.t('settings.save'),
-                            style: TextStyle(
-                                color: c.bg, fontSize: s * 0.028, fontWeight: FontWeight.w600)),
+                        Icon(Icons.check, size: s * 0.034, color: c.bg),
+                        SizedBox(width: s * 0.014),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(state.t('settings.save'),
+                                style: TextStyle(
+                                    color: c.bg, fontSize: s * 0.03, fontWeight: FontWeight.w600)),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -243,6 +261,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           timeout: _ssTimeout.round(),
           mode: _ssMode,
           brightness: _ssBrightness,
+          hardwareDimming: _hwDimming,
         ),
         turntable: TurntableConfig(
           spinDuration: _spinDuration.round(),
@@ -259,7 +278,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           title.toUpperCase(),
           style: TextStyle(
             color: c.accent,
-            fontSize: s * 0.022,
+            fontSize: s * 0.032,
             fontWeight: FontWeight.w700,
             letterSpacing: 1.5,
           ),
@@ -277,8 +296,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
       child: Row(
         children: [
           SizedBox(
-            width: s * 0.22,
-            child: Text(label, style: TextStyle(color: c.textDim, fontSize: s * 0.024)),
+            width: s * 0.24,
+            child: Text(label, style: TextStyle(color: c.textDim, fontSize: s * 0.026)),
           ),
           Expanded(child: child),
         ],
@@ -293,8 +312,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
       child: Row(
         children: [
           SizedBox(
-            width: s * 0.22,
-            child: Text(label, style: TextStyle(color: c.textDim, fontSize: s * 0.024)),
+            width: s * 0.24,
+            child: Text(label, style: TextStyle(color: c.textDim, fontSize: s * 0.026)),
           ),
           Switch(
             value: value,
@@ -314,8 +333,8 @@ class _SettingsPanelState extends State<SettingsPanel> {
       child: Row(
         children: [
           SizedBox(
-            width: s * 0.22,
-            child: Text(label, style: TextStyle(color: c.textDim, fontSize: s * 0.024)),
+            width: s * 0.24,
+            child: Text(label, style: TextStyle(color: c.textDim, fontSize: s * 0.026)),
           ),
           Expanded(
             child: Slider(
@@ -344,7 +363,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
               onTap: () => onSelected(opt.value),
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 2),
-                padding: EdgeInsets.symmetric(vertical: s * 0.012),
+                padding: EdgeInsets.symmetric(vertical: s * 0.014),
                 decoration: BoxDecoration(
                   color: active ? c.accent : c.surface2,
                   borderRadius: BorderRadius.circular(8),
@@ -353,7 +372,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                   child: Text(opt.label,
                       style: TextStyle(
                         color: active ? c.bg : c.textDim,
-                        fontSize: s * 0.022,
+                        fontSize: s * 0.024,
                         fontWeight: active ? FontWeight.w600 : FontWeight.normal,
                       )),
                 ),

@@ -14,8 +14,7 @@ class SpotifyAccount {
 
   Map<String, dynamic> toJson() => {'id': id, 'label': label, 'color': color};
 
-  factory SpotifyAccount.fromJson(Map<String, dynamic> json) =>
-      SpotifyAccount(
+  factory SpotifyAccount.fromJson(Map<String, dynamic> json) => SpotifyAccount(
         id: json['id'] as String,
         label: json['label'] as String,
         color: json['color'] as String? ?? '#4fc3f7',
@@ -27,12 +26,14 @@ class ScreensaverConfig {
   final int timeout; // seconds
   final String mode; // 'analog' | 'digital'
   final double brightness; // 0..1
+  final bool hardwareDimming; // dim physical backlight via USB
 
   const ScreensaverConfig({
     this.enabled = true,
     this.timeout = 30,
     this.mode = 'analog',
     this.brightness = 0.18,
+    this.hardwareDimming = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -40,14 +41,15 @@ class ScreensaverConfig {
         'timeout': timeout,
         'mode': mode,
         'brightness': brightness,
+        'hardwareDimming': hardwareDimming,
       };
 
-  factory ScreensaverConfig.fromJson(Map<String, dynamic> json) =>
-      ScreensaverConfig(
+  factory ScreensaverConfig.fromJson(Map<String, dynamic> json) => ScreensaverConfig(
         enabled: json['enabled'] as bool? ?? true,
         timeout: json['timeout'] as int? ?? 30,
         mode: json['mode'] as String? ?? 'analog',
         brightness: (json['brightness'] as num?)?.toDouble() ?? 0.18,
+        hardwareDimming: json['hardwareDimming'] as bool? ?? false,
       );
 }
 
@@ -130,8 +132,7 @@ class SocoApiConfig {
         timeout: json['timeout'] as int? ?? 4000,
       );
 
-  SocoApiConfig copyWith({String? baseUrl, int? pollInterval, int? timeout}) =>
-      SocoApiConfig(
+  SocoApiConfig copyWith({String? baseUrl, int? pollInterval, int? timeout}) => SocoApiConfig(
         baseUrl: baseUrl ?? this.baseUrl,
         pollInterval: pollInterval ?? this.pollInterval,
         timeout: timeout ?? this.timeout,

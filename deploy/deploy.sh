@@ -136,14 +136,35 @@ rsync -avz --delete \
   --exclude='native_assets/' \
   "$BUNDLE_DIR/" "$PI_HOST:$DEPLOY_DIR/"
 
-# Also copy the systemd service files
-for svc in sonos-tt-flutter.service soco-cli.service soco-discover.service soco-discover.timer; do
-  if [ -f "$SCRIPT_DIR/$svc" ]; then
+# Also copy the systemd service files and backlight helper
+for f in sonos-tt-flutter.service soco-cli.service soco-discover.service soco-discover.timer brightness.py 51-waveshare-backlight.rules; do
+  if [ -f "$SCRIPT_DIR/$f" ]; then
     rsync -avz \
       -e "$SSH_RSYNC_E" \
-      "$SCRIPT_DIR/$svc" "$PI_HOST:$DEPLOY_DIR/"
+      "$SCRIPT_DIR/$f" "$PI_HOST:$DEPLOY_DIR/"
   fi
 done
+
+# Install backlight udev rule + pyusb if the brightness script is present.
+# This enables hardware backlight dimming for Waveshare displays.
+if ssh "${SSH_CTL[@]}" "$PI_HOST" "test -f '$DEPLOY_DIR/brightness.py'" 2>/dev/null; then
+  echo "→ Setting up hardware backlight dimming (Waveshare USB control)..."
+  ssh "${SSH_CTL[@]}" "$PI_HOST" "
+    # Install pyusb if missing (needed by brightness.py)
+    dpkg -s python3-usb >/dev/null 2>&1 || sudo apt install -y python3-usb
+    # Install or update udev rule for non-root USB + hidraw access.
+    # Always compare and update if the deployed version differs — this ensures
+    # the hidraw rule (needed for touchscreen-safe brightness control) is
+    # installed even if the old USB-only rule was already present.
+    UDEV_DST=/etc/udev/rules.d/51-waveshare-backlight.rules
+    if [ ! -f "$UDEV_DST" ] || ! diff -q '$DEPLOY_DIR/51-waveshare-backlight.rules' "$UDEV_DST" >/dev/null 2>&1; then
+      sudo cp '$DEPLOY_DIR/51-waveshare-backlight.rules' "$UDEV_DST"
+      sudo udevadm control --reload-rules
+      sudo udevadm trigger
+      echo '  Backlight udev rule installed/updated (reboot or replug USB to activate).'
+    fi
+  " 2>/dev/null || true
+fi
 
 # Ensure the remote user can access DRM/GPU/input devices for manual runs.
 ensure_groups

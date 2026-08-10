@@ -42,9 +42,10 @@ class BarPanel extends StatelessWidget {
     // Title bar — doubled in width for a bolder, more prominent look.
     final titleBarWidth = size * 0.07; // ≈ 76px on a 1080px screen
 
-    // Close area — reduced by 60% from the full remaining width.
-    // (Full width would be ~size * 0.25; 40% of that is ~size * 0.10.)
-    final closeAreaWidth = (size - contentWidth - titleBarWidth) * 0.4;
+    // Close area — reduced to 50% of the remaining width for a more balanced
+    // layout. This shifts the title bar and content slightly left, centering
+    // them better on the circular display.
+    final closeAreaWidth = (size - contentWidth - titleBarWidth) * 0.5;
 
     return Container(
       width: size,
@@ -77,9 +78,9 @@ class BarPanel extends StatelessWidget {
                     title.toUpperCase(),
                     style: TextStyle(
                       color: c.accent,
-                      fontSize: size * 0.026,
+                      fontSize: size * 0.03,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: size * 0.005,
+                      letterSpacing: size * 0.006,
                     ),
                   ),
                 ),
@@ -141,17 +142,17 @@ class _CloseAreaState extends State<_CloseArea> {
           children: [
             Icon(
               Icons.arrow_back,
-              size: s * 0.05,
+              size: s * 0.055,
               color: _pressed ? c.accent : c.textDim,
             ),
-            SizedBox(height: s * 0.008),
+            SizedBox(height: s * 0.01),
             Text(
               'BACK',
               style: TextStyle(
                 color: _pressed ? c.accent : c.textFaint,
-                fontSize: s * 0.016,
+                fontSize: s * 0.018,
                 fontWeight: FontWeight.w600,
-                letterSpacing: s * 0.0025,
+                letterSpacing: s * 0.003,
               ),
             ),
           ],

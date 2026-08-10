@@ -77,247 +77,253 @@ class _TurntableLayerState extends State<TurntableLayer> {
     final size = MediaQuery.of(context).size.shortestSide;
     final screenSize = MediaQuery.of(context).size;
 
-    if (state.view != AppView.turntable) return const SizedBox.shrink();
+    // Keep the turntable disc alive even when a dialog/screensaver is open.
+    // Using Offstage instead of SizedBox.shrink() preserves the _TurntableDisc
+    // state (rotation angle + speed), so closing a dialog doesn't restart the
+    // rotation from zero. The Ticker keeps running to track playback state,
+    // but no painting occurs while offstage.
+    return Offstage(
+      offstage: state.view != AppView.turntable,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: _handleTap,
+        onPanStart: _handlePanStart,
+        onPanEnd: (d) => _handlePanEnd(d, screenSize),
+        child: Container(
+          color: c.bg,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // ──────────────────────────────────────────────────────────────
+              // Rotating vinyl disc.
+              //
+              // Self-contained rendering via CustomPaint. The disc owns its
+              // own Ticker and renders the artwork + grooves directly on a
+              // GPU-accelerated canvas. No setState() is called during
+              // rotation — a ValueNotifier drives repainting through
+              // CustomPaint's `repaint` parameter.
+              //
+              // The surrounding RepaintBoundary ensures only this layer
+              // repaints during rotation. Static elements (text bars, center
+              // button, etc.) are never touched by the per-frame animation.
+              // ──────────────────────────────────────────────────────────────
+              _TurntableDisc(
+                artworkUrl: pb.artworkUrl,
+                artworkCache: state.artworkCache,
+                isPlaying: pb.isPlaying,
+                spinDuration: state.config.ui.turntable.spinDuration.toDouble(),
+                size: size,
+                bgIconColor: c.textDim,
+              ),
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapUp: _handleTap,
-      onPanStart: _handlePanStart,
-      onPanEnd: (d) => _handlePanEnd(d, screenSize),
-      child: Container(
-        color: c.bg,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // ──────────────────────────────────────────────────────────────
-            // Rotating vinyl disc.
-            //
-            // Self-contained rendering via CustomPaint. The disc owns its
-            // own Ticker and renders the artwork + grooves directly on a
-            // GPU-accelerated canvas. No setState() is called during
-            // rotation — a ValueNotifier drives repainting through
-            // CustomPaint's `repaint` parameter.
-            //
-            // The surrounding RepaintBoundary ensures only this layer
-            // repaints during rotation. Static elements (text bars, center
-            // button, etc.) are never touched by the per-frame animation.
-            // ──────────────────────────────────────────────────────────────
-            _TurntableDisc(
-              artworkUrl: pb.artworkUrl,
-              artworkCache: state.artworkCache,
-              isPlaying: pb.isPlaying,
-              spinDuration: state.config.ui.turntable.spinDuration.toDouble(),
-              size: size,
-              bgIconColor: c.textDim,
-            ),
-
-            // ──────────────────────────────────────────────────────────────
-            // Static overlay elements — isolated in their own RepaintBoundary
-            // so they NEVER repaint during rotation. They only rebuild when
-            // AppState changes (track change, play/pause toggle, etc.).
-            // ──────────────────────────────────────────────────────────────
-            RepaintBoundary(
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Center play/pause button (the "spindle")
-                  Center(
-                    child: GestureDetector(
-                      onTap: () {
-                        final state = context.read<AppState>();
-                        if (!state.navVisible) {
-                          state.togglePlayPause();
-                        }
-                      },
-                      child: Container(
-                        width: size * 0.18,
-                        height: size * 0.18,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.black.withValues(alpha: 0.85),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.white.withValues(alpha: 0.15),
-                              blurRadius: 8,
-                              spreadRadius: -2,
+              // ──────────────────────────────────────────────────────────────
+              // Static overlay elements — isolated in their own RepaintBoundary
+              // so they NEVER repaint during rotation. They only rebuild when
+              // AppState changes (track change, play/pause toggle, etc.).
+              // ──────────────────────────────────────────────────────────────
+              RepaintBoundary(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Center play/pause button (the "spindle")
+                    Center(
+                      child: GestureDetector(
+                        onTap: () {
+                          final state = context.read<AppState>();
+                          if (!state.navVisible) {
+                            state.togglePlayPause();
+                          }
+                        },
+                        child: Container(
+                          width: size * 0.18,
+                          height: size * 0.18,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.black.withValues(alpha: 0.85),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.white.withValues(alpha: 0.15),
+                                blurRadius: 8,
+                                spreadRadius: -2,
+                              ),
+                            ],
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
+                              width: 1,
                             ),
-                          ],
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.12),
-                            width: 1,
                           ),
-                        ),
-                        child: Icon(
-                          pb.isPlaying ? Icons.pause : Icons.play_arrow,
-                          size: size * 0.08,
-                          color: Colors.white.withValues(alpha: 0.9),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Speaker name at top — moved up 5% for vertical balance
-                  if (state.sonos.activeSpeaker?.name.isNotEmpty ?? false)
-                    Positioned(
-                      top: size * 0.20,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        padding: EdgeInsets.symmetric(vertical: size * 0.01),
-                        child: Text(
-                          state.sonos.activeSpeaker!.name,
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: c.textDim,
-                            fontSize: size * 0.035,
-                            fontWeight: FontWeight.w600,
+                          child: Icon(
+                            pb.isPlaying ? Icons.pause : Icons.play_arrow,
+                            size: size * 0.08,
+                            color: Colors.white.withValues(alpha: 0.9),
                           ),
                         ),
                       ),
                     ),
 
-                  // Track info at bottom — symmetric with speaker bar
-                  Positioned(
-                    bottom: size * 0.17,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      color: Colors.white.withValues(alpha: 0.7),
-                      padding: EdgeInsets.symmetric(vertical: size * 0.01),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            pb.title.isNotEmpty ? pb.title : '—',
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: c.text,
-                              fontSize: size * 0.038,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            pb.artist.isNotEmpty ? pb.artist : '—',
+                    // Speaker name at top — moved up 5% for vertical balance
+                    if (state.sonos.activeSpeaker?.name.isNotEmpty ?? false)
+                      Positioned(
+                        top: size * 0.20,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          color: Colors.white.withValues(alpha: 0.7),
+                          padding: EdgeInsets.symmetric(vertical: size * 0.01),
+                          child: Text(
+                            state.sonos.activeSpeaker!.name,
                             textAlign: TextAlign.center,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: c.textDim,
-                              fontSize: size * 0.025,
+                              fontSize: size * 0.035,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
 
-                  // Connection indicator dot
-                  Positioned(
-                    top: size * 0.05,
-                    right: size * 0.05,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: state.connection.connected
-                            ? Colors.green
-                            : state.connection.mock
-                                ? Colors.orange
-                                : Colors.red,
-                      ),
-                    ),
-                  ),
-
-                  // Mock mode banner
-                  if (state.connection.mock)
+                    // Track info at bottom — symmetric with speaker bar
                     Positioned(
-                      top: size * 0.12,
+                      bottom: size * 0.17,
                       left: 0,
                       right: 0,
                       child: Container(
-                        width: size * 0.72,
-                        margin: EdgeInsets.symmetric(horizontal: size * 0.14),
-                        padding: EdgeInsets.all(size * 0.015),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.1),
-                          border: Border.all(
-                            color: Colors.orange.withValues(alpha: 0.3),
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                        color: Colors.white.withValues(alpha: 0.7),
+                        padding: EdgeInsets.symmetric(vertical: size * 0.01),
                         child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.warning_amber_rounded,
-                                    size: size * 0.028, color: Colors.orange),
-                                SizedBox(width: size * 0.008),
-                                Text(
-                                  state.t('connection.mock_title'),
-                                  style: TextStyle(
-                                    color: Colors.orange,
-                                    fontSize: size * 0.022,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: size * 0.005),
                             Text(
-                              state.t('connection.mock_text'),
+                              pb.title.isNotEmpty ? pb.title : '—',
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: c.text,
+                                fontSize: size * 0.038,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              pb.artist.isNotEmpty ? pb.artist : '—',
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: c.textDim,
-                                fontSize: size * 0.018,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                            SizedBox(height: size * 0.006),
-                            GestureDetector(
-                              onTap: () => state.api.retryRealConnection(),
-                              child: Container(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: size * 0.03,
-                                  vertical: size * 0.006,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withValues(alpha: 0.15),
-                                  border: Border.all(
-                                    color: Colors.orange.withValues(alpha: 0.4),
-                                  ),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.refresh, size: size * 0.022, color: Colors.orange),
-                                    SizedBox(width: size * 0.008),
-                                    Text(
-                                      state.t('connection.retry'),
-                                      style: TextStyle(
-                                        color: Colors.orange,
-                                        fontSize: size * 0.019,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                fontSize: size * 0.025,
                               ),
                             ),
                           ],
                         ),
                       ),
                     ),
-                ],
+
+                    // Connection indicator dot
+                    Positioned(
+                      top: size * 0.05,
+                      right: size * 0.05,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: state.connection.connected
+                              ? Colors.green
+                              : state.connection.mock
+                                  ? Colors.orange
+                                  : Colors.red,
+                        ),
+                      ),
+                    ),
+
+                    // Mock mode banner
+                    if (state.connection.mock)
+                      Positioned(
+                        top: size * 0.12,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          width: size * 0.72,
+                          margin: EdgeInsets.symmetric(horizontal: size * 0.14),
+                          padding: EdgeInsets.all(size * 0.015),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.1),
+                            border: Border.all(
+                              color: Colors.orange.withValues(alpha: 0.3),
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.warning_amber_rounded,
+                                      size: size * 0.028, color: Colors.orange),
+                                  SizedBox(width: size * 0.008),
+                                  Text(
+                                    state.t('connection.mock_title'),
+                                    style: TextStyle(
+                                      color: Colors.orange,
+                                      fontSize: size * 0.022,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: size * 0.005),
+                              Text(
+                                state.t('connection.mock_text'),
+                                style: TextStyle(
+                                  color: c.textDim,
+                                  fontSize: size * 0.018,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              SizedBox(height: size * 0.006),
+                              GestureDetector(
+                                onTap: () => state.api.retryRealConnection(),
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: size * 0.03,
+                                    vertical: size * 0.006,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withValues(alpha: 0.15),
+                                    border: Border.all(
+                                      color: Colors.orange.withValues(alpha: 0.4),
+                                    ),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.refresh, size: size * 0.022, color: Colors.orange),
+                                      SizedBox(width: size * 0.008),
+                                      Text(
+                                        state.t('connection.retry'),
+                                        style: TextStyle(
+                                          color: Colors.orange,
+                                          fontSize: size * 0.019,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

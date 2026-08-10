@@ -4,6 +4,7 @@ import 'models/app_config.dart';
 import 'models/sonos_models.dart';
 import 'repositories/sonos_repository.dart';
 import 'services/artwork_cache.dart';
+import 'services/backlight_service.dart';
 import 'services/config_service.dart';
 import 'services/sonos_event_service.dart';
 
@@ -14,6 +15,7 @@ class AppState extends ChangeNotifier {
   final SonosRepository api = SonosRepository();
   final ConfigService configService = ConfigService();
   final ArtworkCache artworkCache = ArtworkCache();
+  final BacklightService backlight = BacklightService();
   SonosEventService? _eventService;
 
   AppConfig _config = const AppConfig();
@@ -57,6 +59,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _init() async {
     _config = await configService.loadConfig();
+    await backlight.init();
     _startPolling();
     _startEventService();
     _initialized = true;
@@ -257,9 +260,35 @@ class AppState extends ChangeNotifier {
 
   void setView(AppView v) {
     if (_view == v) return;
+
+    // Hardware backlight dimming: dim when entering screensaver, restore on wake.
+    if (_config.ui.screensaver.hardwareDimming) {
+      if (v == AppView.screensaver) {
+        backlight.dim();
+      } else if (_view == AppView.screensaver) {
+        backlight.restore();
+      }
+    }
+
+    // When returning to the turntable from a dialog (speakers, playlists,
+    // users, settings), keep the navigation panel visible so the user doesn't
+    // have to reopen it. When entering a dialog or screensaver, hide nav.
+    final isDialog = v == AppView.speakers ||
+        v == AppView.playlists ||
+        v == AppView.users ||
+        v == AppView.settings;
+    final wasDialog = _view == AppView.speakers ||
+        _view == AppView.playlists ||
+        _view == AppView.users ||
+        _view == AppView.settings;
+
     _view = v;
     _volumeMode = null;
-    _navVisible = false;
+    if (v == AppView.turntable && wasDialog) {
+      _navVisible = true;
+    } else if (isDialog || v == AppView.screensaver) {
+      _navVisible = false;
+    }
     notifyListeners();
   }
 
@@ -504,6 +533,7 @@ class AppState extends ChangeNotifier {
       'settings.screensaver.timeout': 'Timeout (Sek.)',
       'settings.screensaver.mode': 'Uhr-Modus',
       'settings.screensaver.brightness': 'Helligkeit',
+      'settings.screensaver.hardware_dimming': 'Hardware-Dimming',
       'settings.turntable': 'Plattenspieler',
       'settings.turntable.spin': 'Umlaufzeit (Sek.)',
       'settings.api': 'SoCo-CLI API',
@@ -538,6 +568,7 @@ class AppState extends ChangeNotifier {
       'settings.screensaver.timeout': 'Timeout (sec)',
       'settings.screensaver.mode': 'Clock mode',
       'settings.screensaver.brightness': 'Brightness',
+      'settings.screensaver.hardware_dimming': 'Hardware Dimming',
       'settings.turntable': 'Turntable',
       'settings.turntable.spin': 'Spin duration (sec)',
       'settings.api': 'SoCo-CLI API',
@@ -555,6 +586,8 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _eventService?.dispose();
     api.stopPolling();
+    // Restore backlight to full brightness on app exit.
+    backlight.restore();
     super.dispose();
   }
 }
