@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'models/app_config.dart';
@@ -157,6 +158,9 @@ class AppState extends ChangeNotifier {
   }
 
   void _startEventService() {
+    // The event service uses dart:io WebSockets, which don't exist on web.
+    // Polling is the backbone there; events are a bonus on native platforms.
+    if (kIsWeb) return;
     final service = SonosEventService(
       onEvent: _handleSonosEvent,
       onConnectionChange: (connected) {

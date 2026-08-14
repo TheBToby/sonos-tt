@@ -4,9 +4,9 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' as http;
 
 import '../models/app_config.dart';
 import '../models/sonos_models.dart';
@@ -110,22 +110,41 @@ List<Map<String, dynamic>> parseGroupsResult(String? text) {
 // HTTP helper
 // ---------------------------------------------------------------------------
 
+/// Resolves the effective SoCo server base URL for the current platform.
+///
+/// - Native (Pi/desktop): the configured URL is used as-is (e.g.
+///   `http://localhost:5001` where the real SoCo-CLI server runs).
+/// - Web (test environment): a browser's `localhost` is the VISITOR's
+///   machine, not the server — so localhost URLs are remapped to the
+///   same-origin `/soco` proxy served alongside the app (no CORS, no
+///   mixed content). Explicit absolute URLs are honored unchanged.
+String resolveBaseUrl(String baseUrl) {
+  if (!kIsWeb) return baseUrl;
+  final b = baseUrl.trim();
+  if (b.startsWith('http://localhost') || b.startsWith('http://127.0.0.1')) {
+    return '/soco';
+  }
+  return b;
+}
+
+/// Platform-agnostic HTTP GET (works on native via dart:io-backed client and
+/// on web via XHR/fetch from the `http` package).
+///
+/// On web, `baseUrl` may be a RELATIVE path (e.g. `/soco`) — the browser
+/// resolves it against the page origin, which enables a same-origin proxy
+/// in the test environment (no CORS, no mixed content).
 Future<Map<String, dynamic>> apiGet(String baseUrl, String path, int timeoutMs) async {
-  final client = HttpClient();
-  client.connectionTimeout = Duration(milliseconds: timeoutMs);
+  final client = http.Client();
   try {
-    final uri = Uri.parse('$baseUrl$path');
-    final request = await client.getUrl(uri);
-    request.headers.set('Accept', 'application/json');
-    final response = await request.close().timeout(
-          Duration(milliseconds: timeoutMs),
-          onTimeout: () => throw Exception('timeout'),
-        );
+    final uri = Uri.parse('${resolveBaseUrl(baseUrl)}$path');
+    final response = await client
+        .get(uri, headers: {'Accept': 'application/json'})
+        .timeout(Duration(milliseconds: timeoutMs),
+            onTimeout: () => throw Exception('timeout'));
     if (response.statusCode != 200) {
-      throw Exception('HTTP ${response.statusCode} ${response.reasonPhrase}');
+      throw Exception('HTTP ${response.statusCode}');
     }
-    final body = await response.transform(utf8.decoder).join();
-    return json.decode(body) as Map<String, dynamic>;
+    return json.decode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
   } finally {
     client.close();
   }
@@ -229,7 +248,11 @@ class SonosApi {
   /// Whether we've fallen back to mock mode after repeated failures.
   bool get hasFallenBackToMock => _fallbackToMock;
 
-  bool _shouldUseMock(AppConfig cfg) => isMock(cfg.socoApi.baseUrl) || _fallbackToMock || kIsWeb;
+  /// Mock is used when no server URL is configured (or `mock://`), or after
+  /// repeated connection failures. An explicitly configured URL is honored on
+  /// ALL platforms — including web, where the test environment serves a
+  /// SoCo-CLI-compatible endpoint. (The Pi keeps using localhost:5001.)
+  bool _shouldUseMock(AppConfig cfg) => isMock(cfg.socoApi.baseUrl) || _fallbackToMock;
 
   void resetRareDataCache() {
     _groupsCache = null;

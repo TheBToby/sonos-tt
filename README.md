@@ -148,6 +148,38 @@ Note: the automated smoke test (`deploy/coder-smoke-test.sh`) is unaffected —
 it runs headless Brave **inside** the workspace, where `172.20.0.2:8099` is
 directly reachable.
 
+## SoCo-CLI API in the Test Environment (web)
+
+**The problem:** in a browser, `http://localhost:5001` refers to the
+*visitor's* machine — not the Pi and not the workspace. Additionally the web
+build previously forced built-in mock mode, and `dart:io` usage (`HttpClient`,
+`Platform`, `File`) crashes in the browser.
+
+**The fix (Pi deployment unchanged):**
+
+1. **`deploy/soco-mock-server.py`** (port 5001) — a SoCo-CLI-compatible
+   simulated backend for testing (same JSON contract: `/speakers`,
+   `/<spk>/volume`, `/state`, `/track`, commands … with SoCo-CLI's
+   `N: Title` text formats).
+2. **`deploy/coder-web-server.py`** (port 8099) — serves the app **and**
+   proxies `/soco/*` → the SoCo server. Same-origin → no CORS, no HTTPS
+   mixed-content issues. Binds dual-stack `::` so the Coder workspace proxy
+   (which dials the agent's tailnet IPv6 address) can connect.
+3. **App web fixes** — `apiGet` uses the platform-agnostic `http` package;
+   `localhost`/`127.0.0.1` URLs auto-remap to `/soco` **on web only**; web
+   guards for `dart:io`-based services (event WebSockets, backlight, HA
+   secrets file).
+
+**Usage:** just open the app in the browser — the default
+`http://localhost:5001` config transparently becomes `/soco` on web, and the
+app talks to the (simulated) SoCo server. Leave the URL empty for the
+built-in mock mode. Verify end-to-end:
+
+```bash
+bash deploy/coder-serve-web.sh --daemon   # mock SoCo (:5001) + web app (:8099)
+python3 deploy/verify_soco_web.py         # headless-Brave end-to-end check
+```
+
 ## Architecture
 
 ```

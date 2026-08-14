@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 /// Controls the Waveshare display backlight brightness via a Python helper
 /// script that communicates with the display's USB controller.
 ///
@@ -12,7 +14,9 @@ import 'dart:io';
 /// Pi. It communicates via hidraw (NOT pyusb) to avoid disrupting the
 /// touchscreen on the composite USB device.
 ///
-/// On non-Linux platforms (e.g., macOS dev), all calls are no-ops.
+/// On non-Linux platforms (e.g., macOS dev) and on web, all calls are no-ops.
+/// (kIsWeb guards prevent dart:io Platform/File/Process from being touched
+/// in the browser, where they throw UnsupportedError.)
 class BacklightService {
   static const _scriptPath = '/opt/sonos-tt/brightness.py';
   static const _dimBrightness = 10; // % during screensaver
@@ -33,8 +37,8 @@ class BacklightService {
   int _pendingPercent = _normalBrightness;
 
   /// Whether hardware dimming is supported on this platform.
-  /// Only Linux is supported (the Pi runs Linux; macOS dev is a no-op).
-  bool get isSupported => Platform.isLinux;
+  /// Only Linux is supported (the Pi runs Linux; macOS dev and web are no-ops).
+  bool get isSupported => !kIsWeb && Platform.isLinux;
 
   /// Whether the brightness script was found during init.
   bool get isAvailable => _available;
@@ -52,7 +56,7 @@ class BacklightService {
   Future<void> init() async {
     if (!isSupported) {
       _available = false;
-      print('[backlight] Not supported on this platform (${Platform.operatingSystem}).');
+      print('[backlight] Not supported on this platform (web or non-Linux).');
       return;
     }
     final script = File(_scriptPath);

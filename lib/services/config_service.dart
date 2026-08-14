@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_config.dart';
@@ -40,6 +42,9 @@ class ConfigService {
   /// This allows the secrets file to provide defaults on the Pi while still
   /// letting the user override via the UI.
   AppConfig _mergeSecrets(AppConfig config) {
+    // The secrets file only exists on the Pi deployment; dart:io File is not
+    // available on web — skip entirely there.
+    if (kIsWeb) return config;
     try {
       final file = File(_secretsPath);
       if (!file.existsSync()) return config;
