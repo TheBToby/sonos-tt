@@ -56,6 +56,98 @@ Notes:
   browser payload into the persistent area, and links a wrapper into
   `/usr/local/bin/brave-browser`.
 
+## Exposing the Smoke-Test App (Port 8099) to the Host
+
+The workspace is a **Docker container** on a Coder host (bridge network
+`172.20.0.0/16`). The app server already binds to `0.0.0.0:8099` *inside* the
+container, but that address is **not routable from your LAN** — the container
+IP `172.20.0.2` only works on the Docker host itself. Pick one of the options
+below (ordered: quickest first).
+
+### Option 1 — `coder port-forward` from your host machine (recommended)
+
+No infra changes needed; works from any machine that can reach the Coder
+server. Run **on the machine where Brave runs** (your laptop/PC):
+
+```bash
+# One-time: install the Coder CLI (https://coder.com/docs/install) and log in
+coder login https://coder.baechtold.rocks
+
+# Forward local 8099 → workspace 8099 (agent "main" of workspace "Sonos-TT")
+coder port-forward Sonos-TT --tcp 8099
+
+# Alternative: SSH local-forward through the same relay
+coder ssh Sonos-TT -L 8099:localhost:8099
+```
+
+Then open **http://localhost:8099** in Brave.
+
+### Option 2 — Coder web preview / code-server port proxy (HTTPS, no CLI)
+
+code-server in this workspace exposes proxied URLs of the form
+`https://<port>--<agent>--<workspace>--<owner>.coder.baechtold.rocks`
+(env var `VSCODE_PROXY_URI`). In VS Code's **Ports/Forwarded Ports** panel
+forward port `8099`, then open
+`https://8099--main--sonos-tt--tobias-baechtold.coder.baechtold.rocks`.
+
+> ⚠️ Currently this returns the NPMplus "Default Page": the reverse proxy in
+> front (NPMplus) serves `*.coder.baechtold.rocks` but has **no proxy-host
+> route to the Coder server for the wildcard subdomains** (and the TLS cert
+> presented doesn't match). To fix (one-time, on the proxy):
+> 1. Add a proxy host for `*.coder.baechtold.rocks` → Coder server
+>    (`coder.baechtold.rocks` upstream), and
+> 2. issue a **wildcard certificate** covering `*.coder.baechtold.rocks`
+>    (DNS-01 challenge) and attach it to both `coder.baechtold.rocks` and the
+>    wildcard proxy host.
+
+### Option 3 — Publish the port in the Coder workspace template (permanent IP)
+
+To make the app reachable at `http://<docker-host-IP>:8099` for everyone on
+the LAN, add the port to the workspace template's Docker resource (requires
+template-admin rights):
+
+```hcl
+resource "docker_container" "workspace" {
+  # …existing config…
+  ports {
+    internal = 8099
+    external = 8099   # published on the Docker host
+    protocol = "tcp"
+  }
+}
+```
+
+Then version + apply the template (`coder templates push <name>`) and rebuild
+the workspace (`coder stop` / `coder start`). Verify on the host:
+`docker ps` must show `0.0.0.0:8099->8099/tcp` for the workspace container.
+
+### Option 4 — Quick iptables DNAT on the Docker host (no template change)
+
+For a temporary, host-level route (note: the container IP may change when the
+workspace restarts — re-check with `docker inspect | grep IPAddress`):
+
+```bash
+sudo iptables -t nat -A PREROUTING -p tcp --dport 8099 \
+  -j DNAT --to-destination 172.20.0.2:8099
+sudo iptables -A FORWARD -p tcp -d 172.20.0.2 --dport 8099 -j ACCEPT
+```
+
+Then open `http://<docker-host-IP>:8099` in Brave. Remove with `-D` instead of
+`-A` when done.
+
+### Which one to choose?
+
+| Scenario | Choice |
+|----------|--------|
+| You just want to smoke test from your own Brave | **Option 1** |
+| Browser-only access, no CLI, HTTPS desired | **Option 2** (needs the NPMplus wildcard fix) |
+| Team/LAN access to the published app | **Option 3** |
+| Quick demo today, template change not possible | **Option 4** |
+
+Note: the automated smoke test (`deploy/coder-smoke-test.sh`) is unaffected —
+it runs headless Brave **inside** the workspace, where `172.20.0.2:8099` is
+directly reachable.
+
 ## Architecture
 
 ```
