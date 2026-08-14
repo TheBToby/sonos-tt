@@ -4,6 +4,58 @@ Flutter frontend for the sonos-tt Sonos controller, designed to run on a
 Raspberry Pi 4 with a 1080×1080px circular touchscreen via **flutter-pi**
 (DRM/KMS, no desktop, no browser).
 
+## Coder Workspace (virtual IDE) — Setup, Build, Publish & Smoke Test
+
+Development continues on a Coder-based virtual IDE. Everything that must
+**survive a workspace update** lives in the persistent volume
+`/opt/coder/sonos-tt/`:
+
+| Persistent path | Contents |
+|-----------------|----------|
+| `/opt/coder/sonos-tt/flutter` | Flutter SDK 3.47.0 (stable) |
+| `/opt/coder/sonos-tt/pub-cache` | Dart/Flutter package cache (`PUB_CACHE`) |
+| `/opt/coder/sonos-tt/publish/web` | Published web build (served via local IP) |
+| `/opt/coder/sonos-tt/tools/brave` | Extracted Brave browser payload |
+| `/opt/coder/sonos-tt/downloads` | Cached installers (Flutter tarball, Brave .deb) |
+| `/opt/coder/sonos-tt/logs` | Build/server logs, smoke-test artifacts |
+
+After a workspace rebuild only the ephemeral parts (`/usr/local/bin` links,
+apt-installed runtime libraries) are gone — re-run setup to restore:
+
+```bash
+# 1. One-time (or after workspace update): SDK + tools + Brave
+bash deploy/coder-setup.sh              # Flutter SDK → persistent area
+sudo bash deploy/coder-install-brave.sh # Brave browser → persistent area
+source deploy/coder-env.sh              # set PATH/PUB_CACHE in your shell
+
+# 2. Build & publish (analyze + test + release build → persistent publish dir)
+bash deploy/coder-build-web.sh
+
+# 3. Serve on the workspace's local IP (port 8099, bound to 0.0.0.0)
+bash deploy/coder-serve-web.sh --daemon
+# → http://<workspace-ip>:8099/   (e.g. http://172.20.0.2:8099/)
+
+# 4. Smoke test in Brave (headless, CDP-driven; artifacts in logs/)
+bash deploy/coder-smoke-test.sh
+```
+
+Notes:
+
+- **Why web?** The Coder workspace has no display/GPU passthrough for
+  flutter-pi; the web build runs in the app's built-in **mock mode**
+  (`kIsWeb` guard) — perfect for UI smoke tests, no Sonos hardware needed.
+  The Raspberry Pi flutter-pi build pipeline is unchanged (`deploy/build.sh`).
+- **Why CDP for the smoke test?** Brave's `--screenshot`/`--dump-dom` wait for
+  a "load complete" event that continuously-animating Flutter apps never
+  emit. `deploy/cdp_capture.py` (stdlib-only Python) drives Brave via the
+  DevTools protocol instead, then asserts the `flutter-view` /
+  `flt-glass-pane` engine markers and captures a screenshot.
+- **Brave on Ubuntu 26.04:** the official Brave `.deb` depends on pre-t64
+  package names (e.g. `libatk1.0-0`) that no longer exist. The install script
+  resolves each dependency to its `t64` successor via apt, extracts the
+  browser payload into the persistent area, and links a wrapper into
+  `/usr/local/bin/brave-browser`.
+
 ## Architecture
 
 ```
