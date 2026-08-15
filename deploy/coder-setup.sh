@@ -39,18 +39,31 @@ else
 fi
 
 # ─── 2. Flutter SDK (persistent) ────────────────────────────────────────────
-if [ -x "$FLUTTER_DIR/bin/flutter" ]; then
-    log "Flutter SDK already present at $FLUTTER_DIR (skipping download)"
-else
-    log "Downloading Flutter $FLUTTER_VERSION …"
-    if [ ! -f "$DOWNLOADS_DIR/$FLUTTER_ARCHIVE" ]; then
-        curl -fSL --retry 3 --connect-timeout 15 "$FLUTTER_URL" \
-             -o "$DOWNLOADS_DIR/$FLUTTER_ARCHIVE"
+install_flutter() {
+    local version="$1" target="$2"
+    if [ -x "$PERSIST_ROOT/$target/bin/flutter" ]; then
+        log "Flutter $version already present at $PERSIST_ROOT/$target"
+        return 0
     fi
-    log "Extracting Flutter SDK to $FLUTTER_DIR …"
-    tar -xJf "$DOWNLOADS_DIR/$FLUTTER_ARCHIVE" -C "$PERSIST_ROOT"
-    # tar extracts a top-level "flutter/" folder — already at the right place.
-fi
+    local archive="flutter_linux_${version}-stable.tar.xz"
+    local url="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/${archive}"
+    if [ ! -f "$DOWNLOADS_DIR/$archive" ]; then
+        log "Downloading Flutter $version …"
+        curl -fSL --retry 3 --connect-timeout 15 "$url" -o "$DOWNLOADS_DIR/$archive"
+    fi
+    log "Extracting Flutter $version → $PERSIST_ROOT/$target …"
+    rm -rf "$PERSIST_ROOT/$target"
+    tar -xJf "$DOWNLOADS_DIR/$archive" -C "$PERSIST_ROOT"
+    mv "$PERSIST_ROOT/flutter" "$PERSIST_ROOT/$target"
+}
+
+# Main SDK (newest stable) — used for web builds.
+install_flutter "$FLUTTER_VERSION" "flutter"
+
+# Pi-build SDK — flutterpi_tool 0.12.0 is compiled against Flutter 3.44.x
+# internals and breaks on newer SDKs; Pi bundles are built with this pinned
+# version (see deploy/build.sh).
+install_flutter "${FLUTTER_PI_VERSION:-3.44.9}" "flutter-pi"
 
 # Flutter SDK is pre-warmed (bin cache committed inside tarball) — disable
 # analytics telemetry for CI-like environments.

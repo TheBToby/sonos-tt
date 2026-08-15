@@ -39,10 +39,37 @@ echo "=== Building sonos-tt for flutter-pi ($PI_ARCH, cpu: $PI_CPU) ==="
 cd "$PROJECT_DIR"
 
 # ─── Ensure Flutter is available ─────────────────────────────────────────────
+# Coder workspace: SDKs live in the persistent volume.
+#
+# IMPORTANT: flutterpi_tool 0.12.0 is compiled against Flutter 3.44.x
+# flutter_tools internals and FAILS on newer SDKs (undefined classes +
+# kernel-version mismatch of the globally activated snapshot). Pi builds
+# therefore use the dedicated persistent 3.44 SDK when present:
+#   /opt/coder/sonos-tt/flutter-pi   (Flutter 3.44.9)
+# The main SDK (/opt/coder/sonos-tt/flutter, newest stable) stays untouched
+# for web builds. On other machines (macOS etc.) whatever flutter is on PATH
+# is used, as before.
+PERSIST="/opt/coder/sonos-tt"
+if [ -x "$PERSIST/flutter-pi/bin/flutter" ]; then
+  export PATH="$PERSIST/flutter-pi/bin:$PATH"
+fi
+if [ -f "$SCRIPT_DIR/coder-env.sh" ] && ! command -v flutter &>/dev/null; then
+  # shellcheck source=coder-env.sh
+  source "$SCRIPT_DIR/coder-env.sh"
+fi
+if ! command -v flutter &>/dev/null && [ -x "$PERSIST/flutter/bin/flutter" ]; then
+  export PATH="$PERSIST/flutter/bin:$PATH"
+fi
 if ! command -v flutter &>/dev/null; then
   echo "ERROR: flutter not found in PATH"
   echo "Install Flutter SDK: https://docs.flutter.dev/get-started/install"
+  echo "(In the Coder workspace run: bash deploy/coder-setup.sh first)"
   exit 1
+fi
+# The pub cache bin must be on PATH so the activated flutterpi_tool launcher
+# resolves the same `dart` as the SDK (avoids kernel-version mismatch).
+if [ -d "${PUB_CACHE:-$PERSIST/pub-cache}/bin" ]; then
+  export PATH="${PUB_CACHE:-$PERSIST/pub-cache}/bin:$PATH"
 fi
 
 # ─── Ensure flutterpi_tool is available ──────────────────────────────────────
@@ -56,6 +83,8 @@ fi
 FLUTTERPI_TOOL=""
 if command -v flutterpi_tool &>/dev/null; then
   FLUTTERPI_TOOL="flutterpi_tool"
+elif [ -n "${PUB_CACHE:-}" ] && [ -x "$PUB_CACHE/bin/flutterpi_tool" ]; then
+  FLUTTERPI_TOOL="$PUB_CACHE/bin/flutterpi_tool"
 elif [ -x "$HOME/.pub-cache/bin/flutterpi_tool" ]; then
   FLUTTERPI_TOOL="$HOME/.pub-cache/bin/flutterpi_tool"
 fi
@@ -63,9 +92,11 @@ fi
 if [ -z "$FLUTTERPI_TOOL" ]; then
   echo "→ flutterpi_tool not found — installing via flutter pub global activate..."
   flutter pub global activate flutterpi_tool
-  # Re-check after installation
+  # Re-check after installation (honours PUB_CACHE, default ~/.pub-cache)
   if command -v flutterpi_tool &>/dev/null; then
     FLUTTERPI_TOOL="flutterpi_tool"
+  elif [ -n "${PUB_CACHE:-}" ] && [ -x "$PUB_CACHE/bin/flutterpi_tool" ]; then
+    FLUTTERPI_TOOL="$PUB_CACHE/bin/flutterpi_tool"
   elif [ -x "$HOME/.pub-cache/bin/flutterpi_tool" ]; then
     FLUTTERPI_TOOL="$HOME/.pub-cache/bin/flutterpi_tool"
   else
