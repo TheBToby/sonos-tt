@@ -148,36 +148,42 @@ Note: the automated smoke test (`deploy/coder-smoke-test.sh`) is unaffected —
 it runs headless Brave **inside** the workspace, where `172.20.0.2:8099` is
 directly reachable.
 
-## SoCo-CLI API in the Test Environment (web)
+## SoCo-CLI API in the Test Environment (web, REAL speakers)
 
 **The problem:** in a browser, `http://localhost:5001` refers to the
 *visitor's* machine — not the Pi and not the workspace. Additionally the web
 build previously forced built-in mock mode, and `dart:io` usage (`HttpClient`,
 `Platform`, `File`) crashes in the browser.
 
-**The fix (Pi deployment unchanged):**
+**The fix — real SoCo-CLI server in the workspace (Pi deployment unchanged):**
 
-1. **`deploy/soco-mock-server.py`** (port 5001) — a SoCo-CLI-compatible
-   simulated backend for testing (same JSON contract: `/speakers`,
-   `/<spk>/volume`, `/state`, `/track`, commands … with SoCo-CLI's
-   `N: Title` text formats).
+1. **SoCo-CLI itself** runs in the workspace from a persistent venv
+   (`/opt/coder/sonos-tt/soco-venv`), with its speaker cache in
+   `/opt/coder/sonos-tt/soco-home` (survives workspace updates). It discovers
+   and controls the **real Sonos speakers** in `192.168.0.0/24`
+   (`SOCO_SUBNETS`, configurable).
 2. **`deploy/coder-web-server.py`** (port 8099) — serves the app **and**
-   proxies `/soco/*` → the SoCo server. Same-origin → no CORS, no HTTPS
-   mixed-content issues. Binds dual-stack `::` so the Coder workspace proxy
-   (which dials the agent's tailnet IPv6 address) can connect.
+   proxies `/soco/*` → the local SoCo-CLI server (:5001). Same-origin → no
+   CORS, no HTTPS mixed-content issues. Binds dual-stack `::` so the Coder
+   workspace proxy (which dials the agent's tailnet IPv6 address) can connect.
 3. **App web fixes** — `apiGet` uses the platform-agnostic `http` package;
    `localhost`/`127.0.0.1` URLs auto-remap to `/soco` **on web only**; web
    guards for `dart:io`-based services (event WebSockets, backlight, HA
    secrets file).
 
-**Usage:** just open the app in the browser — the default
-`http://localhost:5001` config transparently becomes `/soco` on web, and the
-app talks to the (simulated) SoCo server. Leave the URL empty for the
-built-in mock mode. Verify end-to-end:
+**Usage:** open the app in the browser via the Coder workspace proxy
+(e.g. `https://8099--main--sonos-tt--tobias-baechtold.coder.baechtold.rocks`)
+and keep the app's Server URL at its **default** (`http://localhost:5001`) —
+on web it transparently becomes `/soco` and talks to the real SoCo-CLI server
+in the workspace, which controls the real speakers. Leave the URL empty only
+if you want the built-in demo mock mode.
 
 ```bash
-bash deploy/coder-serve-web.sh --daemon   # mock SoCo (:5001) + web app (:8099)
-python3 deploy/verify_soco_web.py         # headless-Brave end-to-end check
+# Start everything: real SoCo-CLI (:5001) + app with /soco proxy (:8099)
+bash deploy/coder-serve-web.sh --daemon
+
+# (Re)discover speakers after network changes:
+HOME=/opt/coder/sonos-tt/soco-home /opt/coder/sonos-tt/soco-venv/bin/soco-discover --subnets 192.168.0.0/24
 ```
 
 ## Architecture
