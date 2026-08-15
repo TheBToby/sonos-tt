@@ -21,12 +21,22 @@ Usage:
 import argparse
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PUBLISH_DIR = "/opt/coder/sonos-tt/publish/web"
 SOCO_URL = "http://127.0.0.1:5001"
 PROXY_PREFIX = "/soco"
+ART_PREFIX = "/soco-art"
+# Artwork may only be fetched from Sonos devices (SSRF guard): host must be
+# a private/LAN address and the path must be /getaa.
+ALLOWED_ART_NETS = ("192.168.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+                    "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+                    "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+                    "172.30.", "172.31.", "localhost", "127.0.0.1")
+ART_CACHE = {}          # url → (content_type, bytes)
+ART_CACHE_MAX = 64
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -62,6 +72,47 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         print(f"[web] {self.address_string()} {fmt % args}", flush=True)
+
+    # ---- /soco-art artwork proxy (Sonos getaa, mixed-content fix) -----------
+    def _proxy_art(self, qs: str):
+        """Fetch Sonos artwork and stream it back same-origin.
+
+        Browsers on an HTTPS page cannot load http://192.168.x.x:1400/getaa
+        (mixed content) — so the app asks this same-origin proxy instead:
+        /soco-art?url=<encoded sonos artwork url>
+        """
+        params = urllib.parse.parse_qs(qs)
+        urls = params.get("url", [])
+        if not urls:
+            return self._send(b"missing url", "text/plain", status=400)
+        url = urls[0]
+        # SSRF guard: only LAN Sonos artwork URLs.
+        try:
+            u = urllib.parse.urlparse(url)
+            host = u.hostname or ""
+            if u.scheme != "http" or not u.path.startswith("/getaa") or \
+                    not any(host.startswith(n) for n in ALLOWED_ART_NETS):
+                return self._send(b"forbidden url", "text/plain", status=403)
+        except ValueError:
+            return self._send(b"invalid url", "text/plain", status=400)
+
+        if url in ART_CACHE:
+            ctype, body = ART_CACHE[url]
+            self._send(body, ctype, cache="private, max-age=3600")
+            return
+
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "sonos-tt-proxy"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                body = r.read()
+                ctype = r.headers.get("Content-Type", "image/jpeg")
+        except Exception as e:  # noqa: BLE001
+            return self._send(f'{{"error": "artwork fetch failed: {e}"}}'.encode(),
+                              "application/json", status=502)
+
+        if body and len(ART_CACHE) < ART_CACHE_MAX:
+            ART_CACHE[url] = (ctype, body)
+        self._send(body, ctype, cache="private, max-age=3600")
 
     # ---- /soco proxy ------------------------------------------------------
     def _proxy_soco(self, path: str):
@@ -109,10 +160,13 @@ class Handler(BaseHTTPRequestHandler):
     # ---- dispatch ---------------------------------------------------------
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        qs = self.path.split("?", 1)[1] if "?" in self.path else ""
+        if path == ART_PREFIX:
+            return self._proxy_art(qs)
         if path == PROXY_PREFIX or path.startswith(PROXY_PREFIX + "/"):
             api_path = path[len(PROXY_PREFIX):]  # keep leading slash
-            if self.path.split("?", 1)[0] != path and "?" in self.path:
-                api_path += "?" + self.path.split("?", 1)[1]
+            if qs:
+                api_path += "?" + qs
             return self._proxy_soco(api_path)
         return self._serve_static(path)
 

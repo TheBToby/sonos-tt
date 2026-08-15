@@ -338,9 +338,14 @@ class SonosApi {
           try {
             final artRes =
                 await apiGet(cfg.socoApi.baseUrl, '/$enc/album_art', cfg.socoApi.timeout);
-            final artUrl = (artRes['result'] as String?)?.trim() ?? '';
+            // The result can be multi-line (e.g. "\n Playback is stopped:\n<url>")
+            // — extract the first http(s) URL instead of requiring the whole
+            // trimmed text to be the URL.
+            final artRaw = (artRes['result'] as String?)?.trim() ?? '';
+            final artMatch = RegExp(r'https?://\S+').firstMatch(artRaw);
+            final artUrl = artMatch?.group(0) ?? '';
             if ((ti['artworkUrl'] == null || (ti['artworkUrl'] as String).isEmpty) &&
-                artUrl.startsWith('http')) {
+                artUrl.isNotEmpty) {
               ti['artworkUrl'] = artUrl;
             }
           } catch (_) {}
